@@ -551,6 +551,21 @@ static bool xhci_read_dcbaa(XHCIState *xhci, unsigned int slotid,
     return true;
 }
 
+/*
+ * Port numbering: by default the USB 3 ports come first (1..p3) and the
+ * USB 2 ports after them; usb2_first (the VL805) turns that around. These
+ * give the index in ports[] of each kind's first port.
+ */
+static unsigned xhci_usb2_base(XHCIState *xhci)
+{
+    return xhci->usb2_first ? 0 : xhci->numports_3;
+}
+
+static unsigned xhci_usb3_base(XHCIState *xhci)
+{
+    return xhci->usb2_first ? xhci->numports_2 : 0;
+}
+
 static XHCIPort *xhci_lookup_port(XHCIState *xhci, struct USBPort *uport)
 {
     int index;
@@ -562,10 +577,10 @@ static XHCIPort *xhci_lookup_port(XHCIState *xhci, struct USBPort *uport)
     case USB_SPEED_LOW:
     case USB_SPEED_FULL:
     case USB_SPEED_HIGH:
-        index = uport->index + xhci->numports_3;
+        index = uport->index + xhci_usb2_base(xhci);
         break;
     case USB_SPEED_SUPER:
-        index = uport->index;
+        index = uport->index + xhci_usb3_base(xhci);
         break;
     default:
         return NULL;
@@ -2258,7 +2273,13 @@ static TRBCCode xhci_configure_slot(XHCIState *xhci, unsigned int slotid,
 
     xhci_dma_read_u32s(xhci, ictx, ictl_ctx, sizeof(ictl_ctx));
 
-    if ((ictl_ctx[0] & 0x3) != 0x0 || (ictl_ctx[1] & 0x3) != 0x1) {
+    /*
+     * A0 (the slot context) should be set, but real controllers (the VL805)
+     * also take a Configure Endpoint that adds endpoints without it, as
+     * Circle sends; the slot's Context Entries then grow to cover them.
+     */
+    if ((ictl_ctx[0] & 0x3) != 0x0 || (ictl_ctx[1] & 0x2) != 0x0
+        || !(ictl_ctx[1] & ~0x3u)) {
         DPRINTF("xhci: invalid input context control %08x %08x\n",
                 ictl_ctx[0], ictl_ctx[1]);
         return CC_TRB_ERROR;
@@ -2307,9 +2328,20 @@ static TRBCCode xhci_configure_slot(XHCIState *xhci, unsigned int slotid,
 
     slot_ctx[3] &= ~(SLOT_STATE_MASK << SLOT_STATE_SHIFT);
     slot_ctx[3] |= SLOT_CONFIGURED << SLOT_STATE_SHIFT;
-    slot_ctx[0] &= ~(SLOT_CONTEXT_ENTRIES_MASK << SLOT_CONTEXT_ENTRIES_SHIFT);
-    slot_ctx[0] |= islot_ctx[0] & (SLOT_CONTEXT_ENTRIES_MASK <<
-                                   SLOT_CONTEXT_ENTRIES_SHIFT);
+    if (ictl_ctx[1] & 0x1) {
+        slot_ctx[0] &= ~(SLOT_CONTEXT_ENTRIES_MASK << SLOT_CONTEXT_ENTRIES_SHIFT);
+        slot_ctx[0] |= islot_ctx[0] & (SLOT_CONTEXT_ENTRIES_MASK <<
+                                       SLOT_CONTEXT_ENTRIES_SHIFT);
+    } else {
+        uint32_t entries = (slot_ctx[0] >> SLOT_CONTEXT_ENTRIES_SHIFT)
+                           & SLOT_CONTEXT_ENTRIES_MASK;
+        uint32_t last = 31 - clz32(ictl_ctx[1]);
+        if (last > entries) {
+            slot_ctx[0] &= ~(SLOT_CONTEXT_ENTRIES_MASK <<
+                             SLOT_CONTEXT_ENTRIES_SHIFT);
+            slot_ctx[0] |= last << SLOT_CONTEXT_ENTRIES_SHIFT;
+        }
+    }
     DPRINTF("xhci: output slot context: %08x %08x %08x %08x\n",
             slot_ctx[0], slot_ctx[1], slot_ctx[2], slot_ctx[3]);
 
@@ -2812,7 +2844,7 @@ static uint64_t xhci_cap_read(void *ptr, hwaddr reg, unsigned size)
         ret = 0x20425355; /* "USB " */
         break;
     case 0x28: /* Supported Protocol:08 */
-        ret = (xhci->numports_2 << 8) | (xhci->numports_3 + 1);
+        ret = (xhci->numports_2 << 8) | (xhci_usb2_base(xhci) + 1);
         break;
     case 0x2c: /* Supported Protocol:0c */
         ret = 0x00000000; /* reserved */
@@ -2824,7 +2856,7 @@ static uint64_t xhci_cap_read(void *ptr, hwaddr reg, unsigned size)
         ret = 0x20425355; /* "USB " */
         break;
     case 0x38: /* Supported Protocol:08 */
-        ret = (xhci->numports_3 << 8) | 1;
+        ret = (xhci->numports_3 << 8) | (xhci_usb3_base(xhci) + 1);
         break;
     case 0x3c: /* Supported Protocol:0c */
         ret = 0x00000000; /* reserved */
@@ -3433,8 +3465,8 @@ static void usb_xhci_init(XHCIState *xhci)
     for (i = 0; i < usbports; i++) {
         speedmask = 0;
         if (i < xhci->numports_2) {
-            port = &xhci->ports[i + xhci->numports_3];
-            port->portnr = i + 1 + xhci->numports_3;
+            port = &xhci->ports[i + xhci_usb2_base(xhci)];
+            port->portnr = i + 1 + xhci_usb2_base(xhci);
             port->uport = &xhci->uports[i];
             port->speedmask =
                 USB_SPEED_MASK_LOW  |
@@ -3445,8 +3477,8 @@ static void usb_xhci_init(XHCIState *xhci)
             speedmask |= port->speedmask;
         }
         if (i < xhci->numports_3) {
-            port = &xhci->ports[i];
-            port->portnr = i + 1;
+            port = &xhci->ports[i + xhci_usb3_base(xhci)];
+            port->portnr = i + 1 + xhci_usb3_base(xhci);
             port->uport = &xhci->uports[i];
             port->speedmask = USB_SPEED_MASK_SUPER;
             assert(i < XHCI_MAXPORTS);

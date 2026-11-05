@@ -53,6 +53,11 @@ config USB_XHCI_VL805
     bool
     select USB_XHCI_PCI
 
+config USB_RYTM
+    bool
+    default y
+    depends on USB
+
 config USB_XHCI_SYSBUS
     bool
     select USB_XHCI

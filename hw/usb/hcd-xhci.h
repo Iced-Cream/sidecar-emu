@@ -190,6 +190,7 @@ typedef struct XHCIState {
     uint32_t numintrs;
     uint32_t numslots;
     uint32_t scratchpad_bufs;   /* advertised in HCSPARAMS2, never touched */
+    bool usb2_first;            /* USB 2 ports numbered before USB 3 ones */
     uint32_t flags;
     uint32_t max_pstreams_mask;
     void (*intr_update)(XHCIState *s, int n, bool enable);

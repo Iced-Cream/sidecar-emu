@@ -1,8 +1,8 @@
 /*
  * VIA VL805 USB 3.0 host controller, as on the Raspberry Pi 4B's PCIe bus
  *
- * A qemu-xhci with the VL805's PCI IDs and port layout (one USB 3 and four
- * USB 2 ports), legacy INTx only (the BCM2711 PCIe model delivers no MSI),
+ * A qemu-xhci with the VL805's PCI IDs and port layout (port 1 USB 2, ports
+ * 2-5 USB 3), legacy INTx only (the BCM2711 PCIe model delivers no MSI),
  * and scratchpad buffers advertised, as bare-metal drivers for the real
  * chip (Circle) expect them.
  *
@@ -24,8 +24,10 @@ static void vl805_xhci_instance_init(Object *obj)
 {
     XHCIPciState *pci = XHCI_PCI(obj);
 
-    pci->xhci.numports_2 = 4;
-    pci->xhci.numports_3 = 1;
+    /* As Circle expects the VL805: port 1 USB 2 (the board's hub), 2-5 USB 3 */
+    pci->xhci.numports_2 = 1;
+    pci->xhci.numports_3 = 4;
+    pci->xhci.usb2_first = true;
     pci->xhci.numintrs = XHCI_MAXINTRS;
     pci->xhci.numslots = XHCI_MAXSLOTS;
     pci->xhci.scratchpad_bufs = 1;
