@@ -21,3 +21,6 @@ GTAGS
 *.swp
 *.patch
 *.gcov
+# Sidecar: run output
+uart.log
+mon.sock
