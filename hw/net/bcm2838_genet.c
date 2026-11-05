@@ -534,7 +534,8 @@ static uint64_t bcm2838_genet_tx(BCM2838GenetState *s, unsigned int ring_index,
         }
 
         num_descs++;
-        cons_index_fld++;
+        /* the index is 16 bits wide and wraps */
+        cons_index_fld = (cons_index_fld + 1) & 0xffff;
         s->regs.tdma.descs[desc_index].length_status =
             FIELD_DP32(s->regs.tdma.descs[desc_index].length_status,
                        GENET_RDMA_LENGTH_STATUS, OWN, 1);
