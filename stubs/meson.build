@@ -35,7 +35,6 @@ if have_block or have_ga
   stub_ss.add(files('icount.c'))
   stub_ss.add(files('graph-lock.c'))
   if libaio.found()
-    stub_ss.add(files('linux-aio.c'))
   endif
   stub_ss.add(files('qemu-timer-notify-cb.c'))
 
@@ -55,14 +54,10 @@ endif
 
 if have_user
   # Symbols that are used by hw/core.
-  stub_ss.add(files('cpu-synchronize-state.c'))
-  stub_ss.add(files('cpu-destroy-address-spaces.c'))
-  stub_ss.add(files('qom-compat-properties.c'))
 
   # Stubs for QAPI events.  Those can always be included in the build, but
   # they are not built at all for --disable-system builds.
   if not have_system
-    stub_ss.add(files('qdev.c'))
   endif
 endif
 
@@ -74,7 +69,6 @@ if have_system
   stub_ss.add(files('cmos.c'))
   stub_ss.add(files('fw_cfg.c'))
   if igvm.found()
-    stub_ss.add(files('igvm.c'))
   endif
   stub_ss.add(files('kvm.c'))
   stub_ss.add(files('win32-kbd-hook.c'))
@@ -93,11 +87,6 @@ if have_system
   stub_ss.add(files('qmp-cpu-s390x.c'))
   stub_ss.add(files('qmp-cpu-s390x-kvm.c'))
   if have_hmp
-    stub_ss.add(files('hmp-cmd-info_mem.c'))
-    stub_ss.add(files('hmp-cmd-info_sev.c'))
-    stub_ss.add(files('hmp-cmd-info_tlb.c'))
-    stub_ss.add(files('hmp-cmds-hw-s390x.c'))
-    stub_ss.add(files('hmp-cmds-target-i386.c'))
   endif
 endif
 

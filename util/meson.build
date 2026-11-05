@@ -20,15 +20,9 @@ if host_os != 'windows'
   util_ss.add(files('memfd.c'))
   util_ss.add(files('drm.c'))
 else
-  util_ss.add(files('aio-win32.c'))
-  util_ss.add(files('event_notifier-win32.c'))
-  util_ss.add(files('oslib-win32.c'))
-  util_ss.add(files('qemu-thread-win32.c'))
   util_ss.add(winmm, pathcch, synchronization)
 endif
-util_ss.add(when: linux_io_uring, if_true: files('fdmon-io_uring.c'))
 if glib_has_gslice
-  util_ss.add(files('qtree.c'))
 endif
 util_ss.add(files('datadir.c'))
 util_ss.add(files('defer-call.c'))
@@ -51,7 +45,6 @@ util_ss.add(files('uuid.c'))
 util_ss.add(files('getauxval.c'))
 util_ss.add(files('rcu.c'))
 if have_membarrier
-  util_ss.add(files('sys_membarrier.c'))
 endif
 util_ss.add(files('log.c'))
 util_ss.add(files('qdist.c'))
@@ -69,7 +62,6 @@ util_ss.add(files('lockcnt.c'))
 
 if have_system
   util_ss.add(files('crc-ccitt.c'))
-  util_ss.add(when: gio, if_true: files('dbus.c'))
   if host_os == 'linux'
     util_ss.add(files('userfaultfd.c'))
   endif
@@ -102,7 +94,6 @@ if have_block
   if config_host_data.get('CONFIG_INOTIFY1')
     util_ss.add(files('filemonitor-inotify.c'), inotify)
   else
-    util_ss.add(files('filemonitor-stub.c'))
   endif
   if host_os == 'linux'
     util_ss.add(files('vhost-user-server.c'), vhost_user)
@@ -113,15 +104,10 @@ if have_block
 endif
 
 if cpu == 'aarch64'
-  util_ss.add(files('cpuinfo-aarch64.c'))
 elif cpu == 'x86_64'
   util_ss.add(files('cpuinfo-i386.c'))
 elif cpu == 'loongarch64'
-  util_ss.add(files('cpuinfo-loongarch.c'))
 elif cpu == 'ppc64'
-  util_ss.add(files('cpuinfo-ppc.c'))
 elif cpu == 'riscv64'
-  util_ss.add(files('cpuinfo-riscv.c'))
 elif cpu == 's390x'
-  util_ss.add(files('s390x_pci_mmio.c'))
 endif

@@ -45,74 +45,48 @@ system_ss.add(when: 'CONFIG_TCG', if_true: files('blkreplay.c'))
 system_ss.add(files('block-ram-registrar.c'))
 
 if get_option('qcow1').allowed()
-  block_ss.add(files('qcow.c'))
 endif
 if get_option('vdi').allowed()
-  block_ss.add(files('vdi.c'))
 endif
 if get_option('vhdx').allowed()
-  block_ss.add(files(
-    'vhdx-endian.c',
-    'vhdx-log.c',
-    'vhdx.c'
-  ))
 endif
 if get_option('vmdk').allowed()
-  block_ss.add(files('vmdk.c'))
 endif
 if get_option('vpc').allowed()
-  block_ss.add(files('vpc.c'))
 endif
 if get_option('cloop').allowed()
-  block_ss.add(files('cloop.c'))
 endif
 if get_option('bochs').allowed()
-  block_ss.add(files('bochs.c'))
 endif
 if get_option('vvfat').allowed()
-  block_ss.add(files('vvfat.c'))
 endif
 if get_option('dmg').allowed()
-  block_ss.add(files('dmg.c'))
 endif
 if get_option('qed').allowed()
-  block_ss.add(files(
-    'qed-check.c',
-    'qed-cluster.c',
-    'qed-l2-cache.c',
-    'qed-table.c',
-    'qed.c',
-  ))
 endif
 if get_option('parallels').allowed()
-  block_ss.add(files('parallels.c', 'parallels-ext.c'))
 endif
 
 if host_os == 'windows'
-  block_ss.add(files('file-win32.c', 'win32-aio.c'))
 else
   block_ss.add(files('file-posix.c'), coref, iokit)
 endif
-block_ss.add(when: libiscsi, if_true: files('iscsi-opts.c'))
 if host_os == 'linux'
   block_ss.add(files('nvme.c'))
 endif
 if get_option('replication').allowed()
-  block_ss.add(files('replication.c'))
 endif
-block_ss.add(when: libaio, if_true: files('linux-aio.c'))
-block_ss.add(when: linux_io_uring, if_true: files('io_uring.c'))
 
 block_modules = {}
 
 modsrc = []
 foreach m : [
-  [blkio, 'blkio', files('blkio.c')],
-  [curl, 'curl', files('curl.c')],
-  [libiscsi, 'iscsi', files('iscsi.c')],
-  [libnfs, 'nfs', files('nfs.c')],
-  [libssh, 'ssh', files('ssh.c')],
-  [rbd, 'rbd', files('rbd.c')],
+  [blkio, 'blkio', files()],
+  [curl, 'curl', files()],
+  [libiscsi, 'iscsi', files()],
+  [libnfs, 'nfs', files()],
+  [libssh, 'ssh', files()],
+  [rbd, 'rbd', files()],
 ]
   if m[0].found()
     module_ss = ss.source_set()

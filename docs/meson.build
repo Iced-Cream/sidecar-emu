@@ -58,7 +58,7 @@ if build_docs
   this_manual = custom_target('QEMU manual',
                 build_by_default: build_docs,
                 output: 'docs.stamp',
-                input: files('conf.py'),
+                input: files(),
                 depfile: 'docs.d',
                 command: [SPHINX_ARGS, '-Ddepfile=@DEPFILE@',
                           '-Ddepfile_stamp=@OUTPUT0@',

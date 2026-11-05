@@ -46,7 +46,7 @@ libui_sources = files(
     'vgafont.c',
   )
 if pixman.found()
-  libui_sources += files('cp437.c', 'vt100.c')
+  libui_sources += files( )
 endif
 libui = static_library('qemuui', libui_sources + genh,
   dependencies: [pixman, spice_headers],
@@ -60,43 +60,26 @@ system_ss.add(files(
   'util.c',
 ))
 if have_hmp
-  system_ss.add(files('ui-hmp-cmds.c'))
 endif
 system_ss.add(ui)
-system_ss.add(when: pixman, if_true: files('console-vc.c'), if_false: files('console-vc-stubs.c'))
+system_ss.add(when: pixman, if_true: files(), if_false: files('console-vc-stubs.c'))
 if dbus_display
-  system_ss.add(files('dbus-module.c'))
 endif
-system_ss.add(when: spice_protocol, if_true: files('vdagent.c'))
 
 if host_os == 'linux'
   system_ss.add(files('input-linux.c', 'udmabuf.c'))
 endif
-system_ss.add(when: cocoa, if_true: files('cocoa.m'))
 
 vnc_ss = ss.source_set()
-vnc_ss.add(files(
-  'vnc.c',
-  'vnc-enc-zlib.c',
-  'vnc-enc-hextile.c',
-  'vnc-enc-tight.c',
-  'vnc-palette.c',
-  'vnc-enc-zrle.c',
-  'vnc-auth-vencrypt.c',
-  'vnc-ws.c',
-  'vnc-jobs.c',
-  'vnc-clipboard.c',
-))
 vnc_ss.add(zlib, jpeg, png)
-vnc_ss.add(when: sasl, if_true: files('vnc-auth-sasl.c'))
 system_ss.add_all(when: [vnc, pixman], if_true: vnc_ss)
-system_ss.add(when: vnc, if_true: files('vnc-system.c'), if_false: files('vnc-stubs.c'))
+system_ss.add(when: vnc, if_true: files(), if_false: files('vnc-stubs.c'))
 
 ui_modules = {}
 
 if curses.found()
   curses_ss = ss.source_set()
-  curses_ss.add(when: [curses, iconv], if_true: [files('curses.c'), pixman])
+  curses_ss.add(when: [curses, iconv], if_true: [files(), pixman])
   ui_modules += {'curses' : curses_ss}
 endif
 
@@ -105,14 +88,14 @@ if opengl.found()
   opengl_ss = ss.source_set()
   opengl_ss.add(gbm, pixman)
   opengl_ss.add(when: [opengl],
-               if_true: files('shader.c', 'console-gl.c', 'egl-helpers.c', 'egl-context.c'))
+               if_true: files(   ))
   ui_modules += {'opengl' : opengl_ss}
 endif
 
 if opengl.found()
   egl_headless_ss = ss.source_set()
   egl_headless_ss.add(when: [opengl, pixman],
-                      if_true: [files('egl-headless.c'), gbm])
+                      if_true: [files(), gbm])
   ui_modules += {'egl-headless' : egl_headless_ss}
 endif
 
@@ -139,54 +122,47 @@ if dbus_display
                                        sources: dbus_display1[0])
   dbus_ss.add(when: gio,
               if_true: [files(
-                'dbus-chardev.c',
-                'dbus-clipboard.c',
-                'dbus-console.c',
-                'dbus-error.c',
-                'dbus-listener.c',
-                'dbus.c',
+                
+                
+                
+                
+                
+                
               ), opengl, gbm, pixman, dbus_display1])
   ui_modules += {'dbus' : dbus_ss}
 endif
 
 if gtk.found()
   if host_os == 'windows'
-    system_ss.add(files('win32-kbd-hook.c'))
   endif
 
   gtk_ss = ss.source_set()
-  gtk_ss.add(gtk, vte, pixman, files('gtk.c'))
-  gtk_ss.add(files('gtk-clipboard.c'))
-  gtk_ss.add(when: x11, if_true: files('x_keymap.c'))
-  gtk_ss.add(when: opengl, if_true: files('gtk-gl-area.c'))
-  gtk_ss.add(when: [x11, opengl], if_true: files('gtk-egl.c'))
+  gtk_ss.add(gtk, vte, pixman, files())
   ui_modules += {'gtk' : gtk_ss}
 endif
 
 if sdl.found()
   sdl_ss = ss.source_set()
   sdl_ss.add(sdl, sdl_image, pixman, glib, files(
-    'sdl2-2d.c',
-    'sdl2-input.c',
-    'sdl2.c',
+    
+    
+    
   ))
-  sdl_ss.add(when: opengl, if_true: files('sdl2-gl.c'))
-  sdl_ss.add(when: x11, if_true: files('x_keymap.c'))
   ui_modules += {'sdl' : sdl_ss}
 endif
 
 if spice.found()
   spice_core_ss = ss.source_set()
   spice_core_ss.add(spice, pixman, files(
-    'spice-core.c',
-    'spice-input.c',
-    'spice-display.c'
+    
+    
+    
   ))
   ui_modules += {'spice-core' : spice_core_ss}
 
   if gio.found()
     spice_ss = ss.source_set()
-    spice_ss.add(spice, gio, pixman, files('spice-app.c'))
+    spice_ss.add(spice, gio, pixman, files())
     ui_modules += {'spice-app': spice_ss}
   endif
 endif

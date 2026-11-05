@@ -16,16 +16,11 @@ tcg_ss.add(files(
   'translator.c',
 ))
 if get_option('plugins')
-  tcg_ss.add(files('plugin-gen.c'))
 endif
 
 user_ss.add_all(tcg_ss)
 system_ss.add_all(tcg_ss)
 
-user_ss.add(files(
-  'user-exec.c',
-  'user-exec-stub.c',
-))
 
 system_ss.add(files(
   'cputlb.c',

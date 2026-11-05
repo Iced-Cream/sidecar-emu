@@ -68,7 +68,7 @@ if host_os == 'windows'
 endif
 
 if host_os == 'windows'
-  plugins_deps = declare_dependency(sources: [files('win32_linker.c')],
+  plugins_deps = declare_dependency(sources: [files()],
                                     include_directories: '../include/plugins',
                                     link_with: win32_qemu_plugin_api_lib,
                                     link_args: win32_qemu_plugin_api_link_flags,
@@ -78,11 +78,6 @@ else
                                     dependencies: glib)
 endif
 
-user_ss.add(files('user.c', 'api-user.c'))
-system_ss.add(files('system.c', 'api-system.c'))
 
-user_ss.add(files('api.c', 'core.c'))
-system_ss.add(files('api.c', 'core.c'))
 
-common_ss.add(files('loader.c'))
 

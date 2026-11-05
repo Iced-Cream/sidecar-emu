@@ -22,9 +22,7 @@ source isa/Kconfig
 source mem/Kconfig
 source misc/Kconfig
 source net/Kconfig
-source nitro/Kconfig
 source nubus/Kconfig
-source nvme/Kconfig
 source nvram/Kconfig
 source pci-bridge/Kconfig
 source pci-host/Kconfig
@@ -39,37 +37,18 @@ source ssi/Kconfig
 source timer/Kconfig
 source tpm/Kconfig
 source uefi/Kconfig
-source ufs/Kconfig
 source usb/Kconfig
 source virtio/Kconfig
 source vfio/Kconfig
-source vfio-user/Kconfig
-source vmapple/Kconfig
 source xen/Kconfig
 source watchdog/Kconfig
 
 # arch Kconfig
 source arm/Kconfig
 source cpu/Kconfig
-source alpha/Kconfig
-source avr/Kconfig
-source hexagon/Kconfig
-source hppa/Kconfig
 source i386/Kconfig
-source loongarch/Kconfig
-source m68k/Kconfig
-source microblaze/Kconfig
-source mips/Kconfig
-source or1k/Kconfig
 source ppc/Kconfig
-source riscv/Kconfig
-source rx/Kconfig
 source s390x/Kconfig
-source sh4/Kconfig
-source sparc/Kconfig
-source sparc64/Kconfig
-source tricore/Kconfig
-source xtensa/Kconfig
 
 # Symbols used by multiple targets
 config TEST_DEVICES

@@ -23,7 +23,7 @@ if gdbstub_xml_files.length() > 0
                               command: [feature_to_c, '@INPUT@'],
                               capture: true)
 else
-  gdbstub_xml = files('gdb-xml-stub.c')
+  gdbstub_xml = files()
 endif
 common_ss.add(gdbstub_xml)
 
@@ -31,7 +31,7 @@ common_ss.add(gdbstub_xml)
 user_ss.add(files(
   'gdbstub.c',
   'syscalls.c',
-  'user.c'
+  
 ))
 
 system_ss.add(files(
@@ -41,4 +41,3 @@ system_ss.add(files(
 ))
 
 # The user-target is specialised by the guest
-specific_ss.add(when: 'CONFIG_USER_ONLY', if_true: files('user-target.c'))

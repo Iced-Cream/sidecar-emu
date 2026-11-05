@@ -7,29 +7,11 @@ linux_user_ss = ss.source_set()
 common_user_inc += include_directories('include/host/' / host_arch)
 common_user_inc += include_directories('include')
 
-linux_user_ss.add(files(
-  'elfload.c',
-  'exit.c',
-  'fd-trans.c',
-  'linuxload.c',
-  'main.c',
-  'mmap.c',
-  'signal.c',
-  'strace.c',
-  'syscall.c',
-  'thunk.c',
-  'uaccess.c',
-  'uname.c',
-))
 linux_user_ss.add(rt)
 linux_user_ss.add(libdw)
 
-linux_user_ss.add(when: 'TARGET_HAS_BFLT', if_true: files('flatload.c'))
-linux_user_ss.add(when: 'TARGET_I386', if_true: files('vm86.c'))
-linux_user_ss.add(when: 'CONFIG_ARM_COMPATIBLE_SEMIHOSTING', if_true: files('semihost.c'))
 
 if get_option('plugins')
-  linux_user_ss.add(files('plugin-api.c'))
 endif
 
 syscall_nr_generators = {}

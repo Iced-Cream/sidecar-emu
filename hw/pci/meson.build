@@ -11,7 +11,6 @@ pci_ss.add(files(
   'slotid_cap.c'
 ))
 if have_hmp
-  pci_ss.add(files('pci-hmp-cmds.c'))
 endif
 # The functions in these modules can be used by devices too.  Since we
 # allow plugging PCIe devices into PCI buses, include them even if

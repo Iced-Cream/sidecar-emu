@@ -1,22 +1,75 @@
-source alpha/Kconfig
 source arm/Kconfig
-source avr/Kconfig
-source hppa/Kconfig
-source i386/Kconfig
-source loongarch/Kconfig
-source m68k/Kconfig
-source microblaze/Kconfig
-source mips/Kconfig
-source or1k/Kconfig
-source ppc/Kconfig
-source riscv/Kconfig
-source rx/Kconfig
-source s390x/Kconfig
-source sh4/Kconfig
-source sparc/Kconfig
-source tricore/Kconfig
-source xtensa/Kconfig
-source hexagon/Kconfig
+
+# The other targets were removed from this tree. Their symbols stay
+# defined (never set) because device Kconfig entries still name them.
+config ALPHA
+    bool
+
+config AVR
+    bool
+
+config HEXAGON
+    bool
+
+config HPPA
+    bool
+
+config I386
+    bool
+
+config X86_64
+    bool
+
+config LOONGARCH64
+    bool
+
+config M68K
+    bool
+
+config MICROBLAZE
+    bool
+
+config MIPS
+    bool
+
+config MIPS64
+    bool
+
+config OR1K
+    bool
+
+config PPC
+    bool
+
+config PPC64
+    bool
+
+config RISCV32
+    bool
+
+config RISCV64
+    bool
+
+config RX
+    bool
+
+config S390X
+    bool
+
+config SH4
+    bool
+
+config SPARC
+    bool
+
+config SPARC64
+    bool
+
+config TRICORE
+    bool
+
+config XTENSA
+    bool
 
 config TARGET_BIG_ENDIAN
     bool

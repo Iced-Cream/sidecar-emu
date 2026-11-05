@@ -14,11 +14,6 @@ chardev_ss.add(files(
   'char.c',
 ))
 if host_os == 'windows'
-  chardev_ss.add(files(
-    'char-console.c',
-    'char-win-stdio.c',
-    'char-win.c',
-  ))
 else
   chardev_ss.add(files(
       'char-fd.c',
@@ -35,20 +30,18 @@ system_ss.add(files(
     'testdev.c'))
 
 if have_hmp
-    system_ss.add(files('char-hmp-cmds.c'))
 endif
 
 chardev_modules = {}
 
 if brlapi.found()
   module_ss = ss.source_set()
-  module_ss.add(when: [brlapi], if_true: [files('baum.c'), pixman])
+  module_ss.add(when: [brlapi], if_true: [files(), pixman])
   chardev_modules += { 'baum': module_ss }
 endif
 
 if spice.found()
   module_ss = ss.source_set()
-  module_ss.add(when: [spice], if_true: files('spice.c'))
   chardev_modules += { 'spice': module_ss }
 endif
 

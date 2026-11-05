@@ -857,7 +857,7 @@ if host_os == 'windows'
 
   win = import('windows')
   version_res = win.compile_resources('version.rc',
-                                      depend_files: files('pc-bios/qemu-nsis.ico'),
+                                      depend_files: files(),
                                       include_directories: include_directories('.'))
   host_dsosuf = '.dll'
 elif host_os == 'darwin'
@@ -1034,7 +1034,7 @@ if get_option('xen').enabled() or (get_option('xen').auto() and have_system)
       xen_ctrl_version = xen_version[0] + \
         ('0' + xen_version[1]).substring(-2) + \
         ('0' + xen_version[2]).substring(-2)
-      if cc.links(files('scripts/xen-detect.c'),
+      if cc.links(files(),
                   args: '-DCONFIG_XEN_CTRL_INTERFACE_VERSION=' + xen_ctrl_version,
                   dependencies: xen_test_deps)
         xen = declare_dependency(version: ver, dependencies: xen_test_deps)
@@ -3646,7 +3646,6 @@ if have_system
     'hw/9pfs',
     'hw/acpi',
     'hw/adc',
-    'hw/alpha',
     'hw/arm',
     'hw/audio',
     'hw/block',
@@ -3654,7 +3653,6 @@ if have_system
     'hw/display',
     'hw/dma',
     'hw/fsi',
-    'hw/hexagon',
     'hw/hyperv',
     'hw/i2c',
     'hw/i3c',
@@ -3666,37 +3664,27 @@ if have_system
     'hw/intc',
     'hw/isa',
     'hw/mem',
-    'hw/mips',
     'hw/misc',
     'hw/misc/macio',
     'hw/net',
     'hw/net/can',
-    'hw/nitro',
     'hw/nubus',
-    'hw/nvme',
     'hw/nvram',
     'hw/pci',
     'hw/pci-host',
     'hw/ppc',
     'hw/rtc',
-    'hw/riscv',
     'hw/s390x',
     'hw/scsi',
     'hw/sd',
     'hw/sensor',
-    'hw/sh4',
-    'hw/sparc',
-    'hw/sparc64',
     'hw/ssi',
     'hw/timer',
     'hw/tpm',
     'hw/uefi',
-    'hw/ufs',
     'hw/usb',
     'hw/vfio',
-    'hw/vfio-user',
     'hw/virtio',
-    'hw/vmapple',
     'hw/watchdog',
     'hw/xen',
     'hw/gpio',
@@ -3715,18 +3703,10 @@ if have_system or have_user
     'target/arm',
     'target/arm/hvf',
     'target/arm/tcg',
-    'target/hexagon',
-    'target/hppa',
     'target/i386',
     'target/i386/kvm',
-    'target/i386/whpx',
-    'target/loongarch',
-    'target/mips/tcg',
-    'target/ppc',
-    'target/riscv',
     'target/s390x',
     'target/s390x/kvm',
-    'target/sparc',
   ]
 endif
 
@@ -3807,7 +3787,7 @@ else
 endif
 
 if enable_modules
-  libmodulecommon = static_library('module-common', files('module-common.c') + genh, pic: true, c_args: '-DBUILD_DSO')
+  libmodulecommon = static_library('module-common', files() + genh, pic: true, c_args: '-DBUILD_DSO')
   modulecommon = declare_dependency(objects: libmodulecommon.extract_all_objects(recursive: false), compile_args: '-DBUILD_DSO')
 endif
 
@@ -3854,7 +3834,6 @@ if have_block
     'qemu-io-cmds.c',
   ))
   if config_host_data.get('CONFIG_REPLICATION')
-    block_ss.add(files('replication.c'))
   endif
 
   subdir('nbd')
@@ -3871,9 +3850,7 @@ if have_block
   # os-posix.c contains POSIX-specific functions used by qemu-storage-daemon,
   # os-win32.c does not
   if host_os == 'windows'
-    system_ss.add(files('os-win32.c'))
   elif host_os == 'emscripten'
-    blockdev_ss.add(files('os-wasm.c'))
   else
     blockdev_ss.add(files('os-posix.c'))
   endif
@@ -3916,9 +3893,6 @@ subdir('common-user')
 subdir('bsd-user')
 subdir('linux-user')
 
-# needed for fuzzing binaries
-subdir('tests/qtest/libqos')
-subdir('tests/qtest/fuzz')
 
 ##############################################
 # Internal static_libraries and dependencies #
@@ -4591,19 +4565,19 @@ subdir('qga')
 # when we don't build tools or system
 if xkbcommon.found()
   # used for the update-keymaps target, so include rules even if !have_tools
-  qemu_keymap = executable('qemu-keymap', files('qemu-keymap.c', 'ui/input-keymap.c') + genh,
+  qemu_keymap = executable('qemu-keymap', files( 'ui/input-keymap.c') + genh,
                            dependencies: [qemuutil, xkbcommon], install: have_tools)
 endif
 
 if have_tools
   tools_link_args = enable_modules ? ['@block.syms'] : []
-  qemu_img = executable('qemu-img', [files('qemu-img.c'), hxdep],
+  qemu_img = executable('qemu-img', [files(), hxdep],
              link_args: tools_link_args, link_depends: block_syms,
              dependencies: [authz, block, crypto, io, qom, qemuutil], install: true)
-  qemu_io = executable('qemu-io', files('qemu-io.c'),
+  qemu_io = executable('qemu-io', files(),
              link_args: tools_link_args, link_depends: block_syms,
              dependencies: [block, qemuutil], install: true)
-  qemu_nbd = executable('qemu-nbd', files('qemu-nbd.c'),
+  qemu_nbd = executable('qemu-nbd', files(),
                link_args: tools_link_args, link_depends: block_syms,
                dependencies: [blockdev, qemuutil, selinux],
                install: true)
@@ -4619,7 +4593,7 @@ if have_tools
 
   subdir('contrib/elf2dmp')
 
-  executable('qemu-edid', files('qemu-edid.c', 'hw/display/edid-generate.c'),
+  executable('qemu-edid', files( ),
              dependencies: [qemuutil, rt],
              install: true)
 
@@ -4632,18 +4606,18 @@ if have_tools
   endif
 
   if host_os == 'linux'
-    executable('qemu-bridge-helper', files('qemu-bridge-helper.c'),
+    executable('qemu-bridge-helper', files(),
                dependencies: [qemuutil, libcap_ng],
                install: true,
                install_dir: get_option('libexecdir'))
 
-    executable('qemu-pr-helper', files('scsi/qemu-pr-helper.c', 'scsi/utils.c'),
+    executable('qemu-pr-helper', files( 'scsi/utils.c'),
                dependencies: [authz, crypto, io, qom, qemuutil,
                               libcap_ng, mpathpersist],
                install: true)
 
     if cpu == 'x86_64'
-      executable('qemu-vmsr-helper', files('tools/i386/qemu-vmsr-helper.c'),
+      executable('qemu-vmsr-helper', files(),
                dependencies: [authz, crypto, io, qom, qemuutil,
                               libcap_ng, mpathpersist],
                install: true)
@@ -4695,7 +4669,7 @@ subdir('pyvenv')
 # supported by emscripten (e.g. fork and unix socket).
 tcg_tests_summary = {}
 if get_option('tests').allowed() and host_os != 'emscripten'
-  subdir('tests')
+  # tests/ is not part of the Sidecar emulator tree
 endif
 if gtk.found()
   subdir('po')
@@ -4721,7 +4695,7 @@ if host_machine.system() == 'windows'
 
   nsis = custom_target('nsis',
                        output: 'qemu-setup-' + meson.project_version() + '.exe',
-                       input: files('qemu.nsi'),
+                       input: files(),
                        build_always_stale: true,
                        command: nsis_cmd + ['@INPUT@'])
   alias_target('installer', nsis)

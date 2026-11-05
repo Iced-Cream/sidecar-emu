@@ -37,20 +37,14 @@ system_ss.add(files(
   'tls.c',
 ), gnutls, zlib)
 if have_hmp
-  system_ss.add([spice_headers, files('migration-hmp-cmds.c'), spice])
+  system_ss.add([spice_headers, files(), spice])
 endif
 
 if get_option('replication').allowed()
-  system_ss.add(files('colo-failover.c', 'colo.c', 'multifd-colo.c'))
 else
   system_ss.add(files('colo-stubs.c'))
 endif
 
-system_ss.add(when: rdma, if_true: files('rdma.c'))
-system_ss.add(when: zstd, if_true: files('multifd-zstd.c'))
-system_ss.add(when: qpl, if_true: files('multifd-qpl.c'))
-system_ss.add(when: uadk, if_true: files('multifd-uadk.c'))
-system_ss.add(when: qatzip, if_true: files('multifd-qatzip.c'))
 system_ss.add(when: 'CONFIG_VFIO',
-              if_true: files('vfio.c'))
+              if_true: files())
 stub_ss.add(files('vfio-stub.c'))

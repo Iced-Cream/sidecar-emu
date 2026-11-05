@@ -7,8 +7,4 @@ system_ss.add(files(
 ))
 
 if have_hmp
-  system_ss.add(files(
-    'hmp-cmds.c',
-    'hmp.c',
-  ))
 endif

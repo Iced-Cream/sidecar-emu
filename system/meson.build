@@ -28,18 +28,11 @@ system_ss.add(files(
 ))
 
 if have_hmp
-  system_ss.add(files(
-    'dirtylimit-hmp-cmds.c',
-    'runstate-hmp-cmds.c',
-    'tpm-hmp-cmds.c',
-  ))
 endif
 
 if have_tpm
-  system_ss.add(files('tpm.c'))
 endif
 
-system_ss.add(when: seccomp, if_true: files('qemu-seccomp.c'))
 system_ss.add(when: 'CONFIG_DEVICE_TREE',
               if_true: [fdt, files('device_tree.c')])
 stub_ss.add(files('device_tree-stub.c'))

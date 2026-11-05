@@ -1,6 +1,5 @@
 system_ss.add(files('control-target.c'))
 if have_hmp
-  system_ss.add(files('trace-hmp-cmds.c'))
 endif
 trace_rs_targets = []
 trace_events_files = []
@@ -91,10 +90,8 @@ if 'ust' in get_option('trace_backends')
 endif
 
 if 'simple' in get_option('trace_backends')
-  trace_ss.add(files('simple.c'))
 endif
 if 'ftrace' in get_option('trace_backends')
-  trace_ss.add(files('ftrace.c'))
 endif
 trace_ss.add(files('control.c'))
 if have_system or have_tools or have_ga
