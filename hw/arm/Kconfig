@@ -64,6 +64,8 @@ config EXYNOS4
     select SDHCI
     select USB_EHCI_SYSBUS
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
 
 config INTEGRATOR
     bool
@@ -351,6 +353,12 @@ config RASPI
     select SDHCI
     select USB_DWC2
     select USB_XHCI_VL805
+    select PCI_EXPRESS # BCM2838 PCIe host for the VL805
+    select PCIE_PORT
+    select ARM_GIC # BCM2711 GIC-400
+    select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select BCM2835_SPI
     select BCM2835_I2C
 
@@ -364,6 +372,8 @@ config STM32F205_SOC
     bool
     select ARM_V7M
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select STM32F2XX_TIMER
     select STM32F2XX_USART
     select STM32F2XX_SYSCFG
@@ -374,6 +384,8 @@ config STM32F405_SOC
     bool
     select ARM_V7M
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select STM32_RCC
     select STM32F2XX_ADC
     select STM32F2XX_SPI
@@ -394,6 +406,8 @@ config STM32L4X5_SOC
     bool
     select ARM_V7M
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select STM32L4X5_EXTI
     select STM32L4X5_SYSCFG
     select STM32L4X5_RCC
@@ -436,6 +450,8 @@ config XLNX_VERSAL
     select XLNX_ZDMA
     select XLNX_ZYNQMP
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select XLNX_BBRAM
     select XLNX_EFUSE_VERSAL
     select XLNX_USB_SUBSYS
@@ -532,6 +548,8 @@ config FSL_IMX6
     select SDHCI
     select USB_CHIPIDEA
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
 
 config ASPEED_SOC
     bool
@@ -559,6 +577,8 @@ config ASPEED_SOC
     select TMP421
     select EMC141X
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select UNIMP
     select LED
     select PMBUS
@@ -580,6 +600,8 @@ config MPS2
     select MPS2_FPGAIO
     select MPS2_SCC
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select PL022    # SPI
     select PL080    # DMA controller
     select SPLIT_IRQ
@@ -611,6 +633,8 @@ config FSL_IMX7
     select PCI_EXPRESS_DESIGNWARE
     select SDHCI
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select UNIMP
     select USB_CHIPIDEA
 
@@ -630,6 +654,8 @@ config FSL_IMX8MP
     select IMX_SERIAL
     select IMX_SPI
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select PCI_EXPRESS_DESIGNWARE
     select PCI_EXPRESS_FSL_IMX8M_PHY
     select SDHCI
@@ -659,6 +685,8 @@ config FSL_IMX8MM
     select IMX_SERIAL
     select IMX_SPI
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select SDHCI
     select PCI_EXPRESS_DESIGNWARE
     select PCI_EXPRESS_FSL_IMX8M_PHY
@@ -753,6 +781,8 @@ config ARMSSE
     select IOTKIT_SYSCTL
     select IOTKIT_SYSINFO
     select OR_IRQ
+    select SPLIT_IRQ
+    select UNIMP
     select SPLIT_IRQ
     select TZ_MPC
     select TZ_MSC
