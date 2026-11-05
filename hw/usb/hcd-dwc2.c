@@ -42,6 +42,7 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-properties-system.h"
 
 #define USB_HZ_FS       12000000
 #define USB_HZ_HS       96000000
@@ -75,6 +76,11 @@ static inline void dwc2_update_irq(DWC2State *s)
         trace_usb_dwc2_update_irq(level);
         qemu_set_irq(s->irq, level);
     }
+}
+
+void dwc2_irq_update(DWC2State *s)
+{
+    dwc2_update_irq(s);
 }
 
 /* flag interrupt condition */
@@ -761,9 +767,14 @@ static void dwc2_glbreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
                           __func__);
         }
         if (!(old & GRSTCTL_CSFTRST) && (val & GRSTCTL_CSFTRST)) {
+            if (dwc2_gadget_enabled(s)) {
+                dwc2_gadget_reset(s);       /* the device side starts over */
+            } else {
                 /* TODO - core soft reset */
-            qemu_log_mask(LOG_UNIMP, "%s: Core soft reset not implemented\n",
-                          __func__);
+                qemu_log_mask(LOG_UNIMP,
+                              "%s: Core soft reset not implemented\n",
+                              __func__);
+            }
         }
         /* don't allow clearing of self-clearing bits */
         val |= old & (GRSTCTL_TXFFLSH | GRSTCTL_RXFFLSH |
@@ -1121,8 +1132,7 @@ static uint64_t dwc2_hsotg_read(void *ptr, hwaddr addr, unsigned size)
         val = dwc2_hreg1_read(ptr, addr, (addr - HSOTG_REG(0x500)) >> 2, size);
         break;
     case HSOTG_REG(0x800) ... HSOTG_REG(0xdfc):
-        /* Gadget-mode registers, just return 0 for now */
-        val = 0;
+        val = dwc2_gadget_read(ptr, addr - HSOTG_REG(0x800));
         break;
     case HSOTG_REG(0xe00) ... HSOTG_REG(0xffc):
         val = dwc2_pcgreg_read(ptr, addr, (addr - HSOTG_REG(0xe00)) >> 2, size);
@@ -1157,7 +1167,7 @@ static void dwc2_hsotg_write(void *ptr, hwaddr addr, uint64_t val,
         dwc2_hreg1_write(ptr, addr, (addr - HSOTG_REG(0x500)) >> 2, val, size);
         break;
     case HSOTG_REG(0x800) ... HSOTG_REG(0xdfc):
-        /* Gadget-mode registers, do nothing for now */
+        dwc2_gadget_write(ptr, addr - HSOTG_REG(0x800), val);
         break;
     case HSOTG_REG(0xe00) ... HSOTG_REG(0xffc):
         dwc2_pcgreg_write(ptr, addr, (addr - HSOTG_REG(0xe00)) >> 2, val, size);
@@ -1264,7 +1274,8 @@ static void dwc2_reset_enter(Object *obj, ResetType type)
     s->gpvndctl = 0;
     s->ggpio = 0;
     s->guid = 0;
-    s->gsnpsid = 0x4f54294a;
+    /* a gadget driver (Circle) wants the Pi's own core, 2.80a */
+    s->gsnpsid = dwc2_gadget_enabled(s) ? 0x4f54280a : 0x4f54294a;
     s->ghwcfg1 = 0;
     s->ghwcfg2 = (8 << GHWCFG2_DEV_TOKEN_Q_DEPTH_SHIFT) |
                  (4 << GHWCFG2_HOST_PERIO_TX_Q_DEPTH_SHIFT) |
@@ -1298,6 +1309,7 @@ static void dwc2_reset_enter(Object *obj, ResetType type)
 
     memset(s->hreg1, 0, sizeof(s->hreg1));
     memset(s->pcgreg, 0, sizeof(s->pcgreg));
+    dwc2_gadget_reset(s);
 
     s->sof_time = 0;
     s->frame_number = 0;
@@ -1373,6 +1385,7 @@ static void dwc2_realize(DeviceState *dev, Error **errp)
                                       &dev->mem_reentrancy_guard);
 
     sysbus_init_irq(sbd, &s->irq);
+    dwc2_gadget_realize(s, errp);
 }
 
 static void dwc2_init(Object *obj)
@@ -1450,6 +1463,8 @@ const VMStateDescription vmstate_dwc2_state = {
 
 static const Property dwc2_usb_properties[] = {
     DEFINE_PROP_UINT32("usb_version", DWC2State, usb_version, 2),
+    DEFINE_PROP_CHR("gadget-chardev", DWC2State, gadget.chr),
+    DEFINE_PROP_UINT32("gadget-out-rate", DWC2State, gadget.out_rate, 128000),
 };
 
 static void dwc2_class_init(ObjectClass *klass, const void *data)

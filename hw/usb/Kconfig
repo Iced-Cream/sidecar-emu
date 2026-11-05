@@ -53,10 +53,14 @@ config USB_XHCI_VL805
     bool
     select USB_XHCI_PCI
 
+config USB_MIDI_CODEC
+    bool
+
 config USB_RYTM
     bool
     default y
     depends on USB
+    select USB_MIDI_CODEC
 
 config USB_XHCI_SYSBUS
     bool
@@ -65,6 +69,7 @@ config USB_XHCI_SYSBUS
 config USB_DWC2
     bool
     select USB
+    select USB_MIDI_CODEC
 
 config USB_HUB
     bool

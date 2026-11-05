@@ -25,6 +25,7 @@
 #include "hw/usb/usb.h"
 #include "system/dma.h"
 #include "qom/object.h"
+#include "dwc2-gadget.h"
 
 #define DWC2_MMIO_SIZE      0x11000
 
@@ -170,6 +171,7 @@ struct DWC2State {
     USBPort uport;
     DWC2Packet packet[DWC2_NB_CHAN];                   /* one packet per chan */
     uint8_t usb_buf[DWC2_NB_CHAN][DWC2_MAX_XFER_SIZE]; /* one buffer per chan */
+    DWC2Gadget gadget;                                 /* device mode */
 };
 
 struct DWC2Class {

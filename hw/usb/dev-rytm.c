@@ -42,6 +42,7 @@
 #include "hw/usb/usb.h"
 #include "migration/vmstate.h"
 #include "desc.h"
+#include "hw/usb/usbmidi-codec.h"
 #include "chardev/char-fe.h"
 #include "qom/object.h"
 
@@ -105,9 +106,7 @@ struct USBRytmState {
     unsigned mi_head, mi_count;
 
     /* raw MIDI -> event packets */
-    uint8_t enc_status, enc_need, enc_n;
-    uint8_t enc_msg[3];
-    bool enc_sysex;
+    USBMIDIEncoder enc;
 
     /* the link's parser */
     uint8_t kind;
@@ -326,9 +325,9 @@ static void rytm_link_send_midi(USBRytmState *s, const uint8_t *d, unsigned n)
  * USB MIDI event packets
  */
 
-static void rytm_midi_in_put(USBRytmState *s, uint8_t cin, const uint8_t *b)
+static void rytm_midi_in_put(void *opaque, const uint8_t ev[4])
 {
-    uint8_t ev[4] = { cin & 0x0f, b[0], b[1], b[2] };   /* cable 0 */
+    USBRytmState *s = opaque;
     unsigned i;
 
     if (s->mi_count + 4 > MIDI_IN_MAX) {
@@ -340,110 +339,12 @@ static void rytm_midi_in_put(USBRytmState *s, uint8_t cin, const uint8_t *b)
     s->mi_count += 4;
 }
 
-/* the link's raw MIDI bytes -> event packets for 0x81 */
-static void rytm_midi_encode(USBRytmState *s, uint8_t b)
-{
-    if (b >= 0xf8) {                         /* real time, anywhere */
-        uint8_t m[3] = { b, 0, 0 };
-        rytm_midi_in_put(s, 0xf, m);
-        return;
-    }
-    if (b == 0xf0) {
-        s->enc_sysex = true;
-        s->enc_status = 0;
-        s->enc_msg[0] = b;
-        s->enc_n = 1;
-        return;
-    }
-    if (b == 0xf7) {                         /* an F7 outside a SysEx */
-        s->enc_sysex = false;
-        s->enc_n = 0;
-        return;
-    }
-    if (s->enc_sysex) {
-        if (b & 0x80) {                      /* a status ends it, unterminated */
-            s->enc_sysex = false;
-            s->enc_n = 0;
-        } else {
-            s->enc_msg[s->enc_n++] = b;
-            if (s->enc_n == 3) {
-                rytm_midi_in_put(s, 0x4, s->enc_msg);
-                s->enc_n = 0;
-            }
-            return;
-        }
-    }
-    if (b & 0x80) {
-        s->enc_status = b;
-        s->enc_n = 0;
-        switch (b & 0xf0) {
-        case 0xc0: case 0xd0:
-            s->enc_need = 1;
-            break;
-        case 0xf0:
-            s->enc_need = (b == 0xf2) ? 2 : (b == 0xf1 || b == 0xf3) ? 1 : 0;
-            if (!s->enc_need) {              /* F6 tune request; F4/F5 */
-                uint8_t m[3] = { b, 0, 0 };
-                if (b == 0xf6) {
-                    rytm_midi_in_put(s, 0x5, m);
-                }
-                s->enc_status = 0;
-            }
-            break;
-        default:
-            s->enc_need = 2;
-        }
-        return;
-    }
-    if (!s->enc_status) {
-        return;                              /* data without a status */
-    }
-    s->enc_msg[1 + s->enc_n++] = b;
-    if (s->enc_n == s->enc_need) {
-        uint8_t m[3] = { s->enc_status, s->enc_msg[1],
-                         s->enc_need > 1 ? s->enc_msg[2] : 0 };
-        uint8_t cin = s->enc_status < 0xf0 ? s->enc_status >> 4
-                    : s->enc_need == 1 ? 0x2 : 0x3;
-        rytm_midi_in_put(s, cin, m);
-        s->enc_n = 0;
-        if (s->enc_status >= 0xf0) {
-            s->enc_status = 0;               /* no running status */
-        }
-    }
-}
-
-/* the SysEx end: CIN 5, 6 or 7 by the bytes in its last packet */
-static void rytm_midi_encode_byte(USBRytmState *s, uint8_t b)
-{
-    if (b == 0xf7 && s->enc_sysex) {
-        unsigned n = s->enc_n + 1;           /* with the F7 */
-        uint8_t m[3] = { 0, 0, 0 };
-        memcpy(m, s->enc_msg, s->enc_n);
-        m[s->enc_n] = 0xf7;
-        rytm_midi_in_put(s, 0x4 + n, m);     /* 5, 6 or 7 */
-        s->enc_sysex = false;
-        s->enc_n = 0;
-        return;
-    }
-    rytm_midi_encode(s, b);
-}
-
-static const uint8_t cin_len[16] = {
-    0, 0, 2, 3, 3, 1, 2, 3, 3, 3, 3, 3, 2, 2, 3, 1
-};
-
 /* event packets from the host (0x01) -> raw MIDI for the link */
 static void rytm_midi_decode(USBRytmState *s, const uint8_t *d, unsigned n)
 {
     g_autofree uint8_t *raw = g_malloc(n);
-    unsigned i, o = 0;
 
-    for (i = 0; i + 4 <= n; i += 4) {
-        unsigned len = cin_len[d[i] & 0x0f];
-        memcpy(raw + o, d + i + 1, len);
-        o += len;
-    }
-    rytm_link_send_midi(s, raw, o);
+    rytm_link_send_midi(s, raw, usbmidi_decode(d, n, raw));
 }
 
 /* ---------------------------------------------------------------------------
@@ -558,7 +459,7 @@ static void rytm_link_body(USBRytmState *s, const uint8_t *d, unsigned n)
     case 'M':
         s->midi_from_link += n;
         for (i = 0; i < n; i++) {
-            rytm_midi_encode_byte(s, d[i]);
+            usbmidi_encode(&s->enc, d[i], rytm_midi_in_put, s);
         }
         if (s->mi_count) {
             usb_wakeup(s->ep_midi_in, 0);
@@ -712,8 +613,7 @@ static void rytm_handle_reset(USBDevice *dev)
     s->in_head = s->in_count = 0;
     s->o_head = s->o_count = 0;
     s->mi_head = s->mi_count = 0;
-    s->enc_sysex = false;
-    s->enc_status = s->enc_n = 0;
+    usbmidi_encoder_reset(&s->enc);
     s->in_counter = 0;
     s->next_block = 0;
     timer_del(s->clock);
