@@ -44,11 +44,14 @@ assistant, so none of it may be submitted to QEMU.
 ## Build
 
 ```
+git clone https://github.com/Iced-Cream/sidecar-emu.git
+cd sidecar-emu
 sudo apt install build-essential ninja-build python3-venv pkg-config libglib2.0-dev libslirp-dev
 sidecar/build.sh            # -> build/qemu-system-aarch64, about 1,500 compile steps
 ```
 
-Works on Linux and in WSL. Only the `aarch64-softmmu` target with the
+Works on Linux and in WSL. On the PC, clone it into the WSL home (not
+`/mnt/d`): the build is much faster on the Linux filesystem. Only the `aarch64-softmmu` target with the
 `sidecar` device config can be configured from this tree.
 
 ## Run
@@ -81,6 +84,14 @@ analog-emu's link.
 
 Kernels, analog-emu cards and anything else built from instrument firmware
 stay out of this repository.
+
+## Repository
+
+https://github.com/Iced-Cream/sidecar-emu is GitHub's fork of qemu/qemu,
+renamed. Its default branch `main` holds this cut-down tree, with history
+starting at the upstream import. The fork's older branches (`master`,
+`raspi4b-net`, `usb-rytm`, `dwc2-gadget`) are full QEMU trees from before
+the cut and are kept only for reference.
 
 ## Licence
 
