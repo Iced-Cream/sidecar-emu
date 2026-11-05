@@ -154,6 +154,13 @@ enum {
      * ARM pseudocode function CheckFPMREnabled().
      */
     ARM_CP_FPMR                  = 1 << 23,
+    /*
+     * Flag: an ARM_CP_IO register whose readfn is safe without the BQL
+     * when icount is off (the generic timer counters only compute from
+     * QEMU_CLOCK_VIRTUAL).  Guests that poll the counter from every core
+     * would otherwise serialise all vCPUs on the BQL.
+     */
+    ARM_CP_LOCKLESS_READ         = 1 << 24,
 };
 
 /*

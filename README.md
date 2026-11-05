@@ -37,7 +37,12 @@ assistant, so none of it may be submitted to QEMU.
   5. **xHCI Evaluate Context** ignores drop flags (full-speed devices
      enumerate), and `usb-hub,fail-intr=on` (test only) makes a hub's
      status-change endpoint fail like the VL805 hub in T103.
-  6. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
+  6. **Generic timer counter without the BQL.** CNTPCT/CNTVCT reads skip the
+     global lock when icount is off (`ARM_CP_LOCKLESS_READ`). The engine
+     polls the counter from every core; with the lock, the vCPUs queued on
+     it. The M4 OS upgrade runs about twice as fast. The full dev engine
+     still hits the watchdog (cross-core wake-ups also take the lock).
+  7. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
      `configs/devices/aarch64-softmmu/sidecar.mak` enables only raspi4b,
      usb-rytm, usb-hub and usb-hid.
 

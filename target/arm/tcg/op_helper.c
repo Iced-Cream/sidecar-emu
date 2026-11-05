@@ -26,6 +26,7 @@
 #include "accel/tcg/cpu-loop.h"
 #include "accel/tcg/probe.h"
 #include "cpregs.h"
+#include "exec/icount.h"
 
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
@@ -1236,6 +1237,14 @@ void HELPER(tidcp_el0)(CPUARMState *env, uint32_t syndrome)
     }
 }
 
+static inline bool cp_read_needs_bql(const ARMCPRegInfo *ri)
+{
+    if (!(ri->type & ARM_CP_IO)) {
+        return false;
+    }
+    return !(ri->type & ARM_CP_LOCKLESS_READ) || icount_enabled();
+}
+
 void HELPER(set_cp_reg)(CPUARMState *env, const void *rip, uint32_t value)
 {
     const ARMCPRegInfo *ri = rip;
@@ -1254,7 +1263,7 @@ uint32_t HELPER(get_cp_reg)(CPUARMState *env, const void *rip)
     const ARMCPRegInfo *ri = rip;
     uint32_t res;
 
-    if (ri->type & ARM_CP_IO) {
+    if (cp_read_needs_bql(ri)) {
         bql_lock();
         res = ri->readfn(env, ri);
         bql_unlock();
@@ -1283,7 +1292,7 @@ uint64_t HELPER(get_cp_reg64)(CPUARMState *env, const void *rip)
     const ARMCPRegInfo *ri = rip;
     uint64_t res;
 
-    if (ri->type & ARM_CP_IO) {
+    if (cp_read_needs_bql(ri)) {
         bql_lock();
         res = ri->readfn(env, ri);
         bql_unlock();
