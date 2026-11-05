@@ -11,6 +11,10 @@
 #   UART         file for the engine's UART log (default uart.log)
 #   WATCHDOG     off = the Pi's watchdog never fires on a missed pat; reboots
 #                the guest asks for (a short timeout) still happen (default on)
+#   CPUS         host CPUs to pin QEMU to (taskset list, e.g. 0-1); QEMU's
+#                threads hand its global lock to each other thousands of times
+#                a second, and on a many-core host (WSL) that is far slower
+#                than on 2 CPUs. Empty = no pinning (default)
 #   EXTRA        more QEMU arguments
 set -euo pipefail
 K=${1:?usage: run-sidecar.sh <kernel8-rpi4.img> [\"engine words\"]}
@@ -36,4 +40,8 @@ if [ -n "$LINK" ]; then
          -device usb-rytm,chardev=rl)
 fi
 # shellcheck disable=SC2086
-exec "$QEMU" "${args[@]}" ${EXTRA:-}
+pin=()
+if [ -n "${CPUS:-}" ]; then
+  pin=(taskset -c "$CPUS")
+fi
+exec "${pin[@]}" "$QEMU" "${args[@]}" ${EXTRA:-}

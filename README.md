@@ -76,6 +76,10 @@ one client at a time), and usb-rytm connecting to analog-emu's link on
 `127.0.0.1:7301`. Environment variables in the script change the ports, turn
 the gadget or usb-rytm off, or add QEMU arguments.
 
+The full dev engine needs `WATCHDOG=off CPUS=0-1`: on a 16-CPU WSL host,
+pinning QEMU to 2 CPUs took the web server from over 5 minutes to 3.6 s
+after boot.
+
 ## Tests
 
 None of these need firmware; `sidecar/tools/stublink.py` stands in for
