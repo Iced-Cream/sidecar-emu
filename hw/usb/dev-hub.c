@@ -47,6 +47,7 @@ struct USBHubState {
     USBEndpoint *intr;
     uint32_t num_ports;
     bool port_power;
+    bool fail_intr;     /* test: every status-change poll ends in a transaction error */
     QEMUTimer *port_timer;
     USBHubPort ports[MAX_PORTS];
 };
@@ -528,6 +529,10 @@ static void usb_hub_handle_data(USBDevice *dev, USBPacket *p)
 
     switch(p->pid) {
     case USB_TOKEN_IN:
+        if (p->ep->nr == 1 && s->fail_intr) {
+            p->status = USB_RET_IOERROR;
+            return;
+        }
         if (p->ep->nr == 1) {
             USBHubPort *port;
             unsigned int status;
@@ -668,6 +673,7 @@ static const VMStateDescription vmstate_usb_hub = {
 static const Property usb_hub_properties[] = {
     DEFINE_PROP_UINT32("ports", USBHubState, num_ports, 8),
     DEFINE_PROP_BOOL("port-power", USBHubState, port_power, false),
+    DEFINE_PROP_BOOL("fail-intr", USBHubState, fail_intr, false),
 };
 
 static void usb_hub_class_initfn(ObjectClass *klass, const void *data)

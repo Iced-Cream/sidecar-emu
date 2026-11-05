@@ -2372,7 +2372,8 @@ static TRBCCode xhci_evaluate_slot(XHCIState *xhci, unsigned int slotid,
 
     xhci_dma_read_u32s(xhci, ictx, ictl_ctx, sizeof(ictl_ctx));
 
-    if (ictl_ctx[0] != 0x0 || ictl_ctx[1] & ~0x3) {
+    /* Drop flags are ignored by Evaluate Context (xHCI 1.2 6.2.5.1); Circle sets D1 with A1 for a full-speed EP0 */
+    if (ictl_ctx[1] & ~0x3) {
         DPRINTF("xhci: invalid input context control %08x %08x\n",
                 ictl_ctx[0], ictl_ctx[1]);
         return CC_TRB_ERROR;
