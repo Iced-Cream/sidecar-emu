@@ -88,10 +88,9 @@ stay out of this repository.
 ## Repository
 
 https://github.com/Iced-Cream/sidecar-emu is GitHub's fork of qemu/qemu,
-renamed. Its default branch `main` holds this cut-down tree, with history
-starting at the upstream import. The fork's older branches (`master`,
-`raspi4b-net`, `usb-rytm`, `dwc2-gadget`) are full QEMU trees from before
-the cut and are kept only for reference.
+renamed. Its only branch, `main`, holds this cut-down tree, with history
+starting at the upstream import. Updating the base means importing the same
+file set at a newer upstream commit and replaying the Sidecar commits on it.
 
 ## Licence
 
