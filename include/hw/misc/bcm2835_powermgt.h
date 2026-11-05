@@ -26,6 +26,7 @@ struct BCM2835PowerMgtState {
     uint32_t rsts;
     uint32_t wdog;
     QEMUTimer *wdog_timer;
+    bool watchdog;          /* false: only short timeouts (reboots) fire */
 };
 
 #endif

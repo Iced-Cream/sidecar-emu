@@ -9,6 +9,8 @@
 #   GADGET_PORT  TCP port for the USB-C gadget's raw MIDI, one client at a time,
 #                e.g. elkflash --port tcp:127.0.0.1:7400; empty = gadget off (default 7400)
 #   UART         file for the engine's UART log (default uart.log)
+#   WATCHDOG     off = the Pi's watchdog never fires on a missed pat; reboots
+#                the guest asks for (a short timeout) still happen (default on)
 #   EXTRA        more QEMU arguments
 set -euo pipefail
 K=${1:?usage: run-sidecar.sh <kernel8-rpi4.img> [\"engine words\"]}
@@ -22,6 +24,9 @@ UART=${UART:-uart.log}
 args=(-M raspi4b -kernel "$K" -append "ip=10.0.2.15 netmask=255.255.255.0 $WORDS"
       -serial "file:$UART" -serial null -display none
       -nic "user,model=bcm2838-genet,hostfwd=tcp:127.0.0.1:$HTTP_PORT-:80")
+if [ "${WATCHDOG:-on}" = off ]; then
+  args+=(-global bcm2835-powermgt.watchdog=off)
+fi
 if [ -n "$GADGET_PORT" ]; then
   args+=(-chardev "socket,id=gm,host=127.0.0.1,port=$GADGET_PORT,server=on,wait=off"
          -global dwc2-usb.gadget-chardev=gm)

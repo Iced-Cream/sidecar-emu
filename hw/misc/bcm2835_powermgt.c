@@ -14,6 +14,7 @@
 #include "hw/misc/bcm2835_powermgt.h"
 #include "migration/vmstate.h"
 #include "system/runstate.h"
+#include "hw/core/qdev-properties.h"
 
 #define PASSWORD 0x5a000000
 #define PASSWORD_MASK 0xff000000
@@ -26,6 +27,11 @@
 #define R_WDOG 0x24
 #define V_WDOG_TIME_MASK 0xfffff
 #define WDOG_TICKS_PER_SECOND 65536
+/*
+ * With watchdog=off, a timeout shorter than this still fires: that is a
+ * guest asking for a reboot (Circle writes a few ticks), not a pat.
+ */
+#define WDOG_REBOOT_MAX_TICKS (WDOG_TICKS_PER_SECOND / 4)
 
 static void bcm2835_powermgt_expire(void *opaque)
 {
@@ -43,7 +49,8 @@ static void bcm2835_powermgt_update_wdog(BCM2835PowerMgtState *s)
     uint64_t timeout_ns;
 
     if ((s->rstc & V_RSTC_WRCFG_MASK) != V_RSTC_FULL_RESET ||
-        s->wdog == 0) {
+        s->wdog == 0 ||
+        (!s->watchdog && s->wdog >= WDOG_REBOOT_MAX_TICKS)) {
         timer_del(s->wdog_timer);
         return;
     }
@@ -170,9 +177,15 @@ static void bcm2835_powermgt_reset(DeviceState *dev)
     timer_del(s->wdog_timer);
 }
 
+static const Property bcm2835_powermgt_properties[] = {
+    DEFINE_PROP_BOOL("watchdog", BCM2835PowerMgtState, watchdog, true),
+};
+
 static void bcm2835_powermgt_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+
+    device_class_set_props(dc, bcm2835_powermgt_properties);
 
     device_class_set_legacy_reset(dc, bcm2835_powermgt_reset);
     dc->vmsd = &vmstate_bcm2835_powermgt;

@@ -42,7 +42,12 @@ assistant, so none of it may be submitted to QEMU.
      polls the counter from every core; with the lock, the vCPUs queued on
      it. The M4 OS upgrade runs about twice as fast. The full dev engine
      still hits the watchdog (cross-core wake-ups also take the lock).
-  7. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
+  7. **Watchdog off switch.** `-global bcm2835-powermgt.watchdog=off`
+     (`WATCHDOG=off` for run-sidecar.sh) stops the Pi watchdog firing on a
+     missed pat, so the full dev engine can run. Reboots the guest asks for
+     (a timeout under 0.25 s) still happen, including the engine's own
+     render-core guard.
+  8. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
      `configs/devices/aarch64-softmmu/sidecar.mak` enables only raspi4b,
      usb-rytm, usb-hub and usb-hid.
 
