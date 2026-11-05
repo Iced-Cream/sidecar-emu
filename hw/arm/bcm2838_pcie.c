@@ -48,6 +48,25 @@ static PCIDevice *bcm2838_pcie_ext_cfg_dev(BCM2838PcieHostState *s,
                            PCIE_MMCFG_DEVFN(mmcfg_addr));
 }
 
+/*
+ * Point the outbound window at the PCIe address in MEM_WIN0_HI:LO. Until the
+ * guest writes it the registers read 0, and the window stays at the address
+ * the DTB declares (BCM2838_PCIE_OUTBOUND_DEFAULT) for guests that rely on the
+ * firmware's setup; reset fills the registers with 0xff, which counts as not
+ * written too. Circle programs PCIe 0xf8000000 here.
+ */
+static void bcm2838_pcie_update_outbound(BCM2838PcieHostState *s)
+{
+    const uint8_t *r = s->root_port.regs - PCIE_CONFIG_SPACE_SIZE;
+    uint64_t pcie_addr = (uint32_t)ldl_le_p(r + BCM2838_PCIE_MEM_WIN0_LO)
+        | (uint64_t)(uint32_t)ldl_le_p(r + BCM2838_PCIE_MEM_WIN0_HI) << 32;
+
+    if (!pcie_addr || pcie_addr == UINT64_MAX) {
+        pcie_addr = BCM2838_PCIE_OUTBOUND_DEFAULT;
+    }
+    memory_region_set_alias_offset(&s->outbound_win, pcie_addr);
+}
+
 static uint64_t bcm2838_pcie_host_read(void *opaque, hwaddr offset,
                                        unsigned size) {
     uint64_t value = ~0;
@@ -120,6 +139,10 @@ static void bcm2838_pcie_host_write(void *opaque, hwaddr offset,
             break;
         default:
             stn_le_p(root_regs + offset - PCIE_CONFIG_SPACE_SIZE, size, value);
+            if (offset < BCM2838_PCIE_MEM_WIN0_HI + 4
+                && offset + size > BCM2838_PCIE_MEM_WIN0_LO) {
+                bcm2838_pcie_update_outbound(s);
+            }
         }
     } else {
         qemu_log_mask(
@@ -183,6 +206,12 @@ static void bcm2838_pcie_host_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(&s->io_ioport_window, 0, &s->io_ioport);
     sysbus_init_mmio(sbd, &s->io_mmio_window);
     sysbus_init_mmio(sbd, &s->io_ioport_window);
+
+    memory_region_init_alias(&s->outbound_win, OBJECT(s),
+                             "bcm2838_pcie_outbound", &s->io_mmio_window,
+                             BCM2838_PCIE_OUTBOUND_DEFAULT,
+                             BCM2838_PCIE_OUTBOUND_SIZE);
+    sysbus_init_mmio(sbd, &s->outbound_win);
 
     for (i = 0; i < BCM2838_PCIE_NUM_IRQS; i++) {
         sysbus_init_irq(sbd, &s->irq[i]);

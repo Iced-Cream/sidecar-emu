@@ -421,21 +421,31 @@ static uint64_t bcm2838_genet_make_u64(uint32_t hi, uint32_t lo)
     return ((uint64_t)hi << 32) | lo;
 }
 
+/*
+ * TBUF_CTRL bit 0 (TBUF_64B_EN): each TX frame starts with a 64-byte status
+ * block. Linux sets it; a driver that leaves it clear (Circle) sends bare
+ * frames.
+ */
+#define GENET_TBUF_CTRL_64B_EN  (1 << 0)
+/* RBUF_CTRL: RX frames get a 64-byte status block, and 2 bytes of padding */
+#define GENET_RBUF_CTRL_64B_EN  (1 << 0)
+#define GENET_RBUF_CTRL_ALIGN_2B (1 << 1)
+
 static void bcm2838_genet_xmit_packet(NetClientState *s, void *packet,
-                                      size_t size)
+                                      size_t size, size_t tsb)
 {
-    uint8_t *buf = packet + sizeof(BCM2838GenetXmitStatus);
+    uint8_t *buf = packet + tsb;
     size_t len;
     uint16_t len_type;
 
     /* We need the status block and a whole Ethernet header (len/type at 12) */
-    if (size < sizeof(BCM2838GenetXmitStatus) + ETH_HLEN) {
+    if (size < tsb + ETH_HLEN) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: TX frame too short (%zu bytes)\n", __func__, size);
         return;
     }
 
-    len = size - sizeof(BCM2838GenetXmitStatus);
+    len = size - tsb;
     net_checksum_calculate(buf, len, CSUM_ALL);
 
     len_type = lduw_be_p(buf + 12);
@@ -516,7 +526,10 @@ static uint64_t bcm2838_genet_tx(BCM2838GenetState *s, unsigned int ring_index,
 
         if (FIELD_EX32(desc_status, GENET_RDMA_LENGTH_STATUS, EOP) != 0) {
             bcm2838_genet_xmit_packet(qemu_get_queue(s->nic), s->tx_packet,
-                                      packet_off);
+                                      packet_off,
+                                      (s->regs.tbuf.ctrl
+                                       & GENET_TBUF_CTRL_64B_EN)
+                                      ? sizeof(BCM2838GenetXmitStatus) : 0);
             packet_off = 0;
         }
 
@@ -866,7 +879,10 @@ static ssize_t bcm2838_genet_rdma(BCM2838GenetState *s, uint32_t ring_idx,
         hwaddr dma_buf_addr =
             bcm2838_genet_make_u64(desc->address_hi, desc->address_lo);
         MemTxResult mem_tx_result = MEMTX_OK;
-        const size_t frame_off = sizeof(BCM2838GenetXmitStatus) + 2;
+        const bool rsb = s->regs.rbuf.ctrl & GENET_RBUF_CTRL_64B_EN;
+        const size_t frame_off =
+            (rsb ? sizeof(BCM2838GenetXmitStatus) : 0)
+            + (s->regs.rbuf.ctrl & GENET_RBUF_CTRL_ALIGN_2B ? 2 : 0);
         uint8_t *frame_buf = dma_buf + frame_off;
 
         bool crc_fwd = FIELD_EX32(s->regs.umac.cmd, GENET_UMAC_CMD, CRC_FWD);
@@ -889,7 +905,7 @@ static ssize_t bcm2838_genet_rdma(BCM2838GenetState *s, uint32_t ring_idx,
                                          GENET_RDMA_LENGTH_STATUS,
                                          EOP, !!(len >= size));
 
-        buflength = l + sizeof(BCM2838GenetXmitStatus) + 2;
+        buflength = l + frame_off;
         if (crc_fwd) {
             buflength += 4;
         }
@@ -911,9 +927,11 @@ static ssize_t bcm2838_genet_rdma(BCM2838GenetState *s, uint32_t ring_idx,
          * We don't implement the hardware's partial RX checksum: report 0 and
          * rely on the guest verifying checksums in software.
          */
-        stl_le_p(dma_buf + offsetof(BCM2838GenetXmitStatus, rx_csum), 0);
-        stl_le_p(dma_buf + offsetof(BCM2838GenetXmitStatus, length_status),
-                 desc->length_status);
+        if (rsb) {
+            stl_le_p(dma_buf + offsetof(BCM2838GenetXmitStatus, rx_csum), 0);
+            stl_le_p(dma_buf + offsetof(BCM2838GenetXmitStatus, length_status),
+                     desc->length_status);
+        }
 
         mem_tx_result = address_space_write(&s->dma_as, dma_buf_addr,
                                             MEMTXATTRS_UNSPECIFIED,

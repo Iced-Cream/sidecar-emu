@@ -2765,8 +2765,15 @@ static void xhci_reset(DeviceState *dev)
 static uint64_t xhci_cap_read(void *ptr, hwaddr reg, unsigned size)
 {
     XHCIState *xhci = ptr;
+    /*
+     * impl.min_access_size is 4, so a byte or 16-bit read (HCIVERSION at
+     * offset 2) arrives here with its own unaligned offset: read the
+     * register it lies in and shift the wanted bytes down.
+     */
+    unsigned shift = (reg & 3) * 8;
     uint32_t ret;
 
+    reg &= ~(hwaddr)3;
     switch (reg) {
     case 0x00: /* HCIVERSION, CAPLENGTH */
         ret = 0x01000000 | LEN_CAP;
@@ -2776,7 +2783,9 @@ static uint64_t xhci_cap_read(void *ptr, hwaddr reg, unsigned size)
             | (xhci->numintrs<<8) | xhci->numslots;
         break;
     case 0x08: /* HCSPARAMS 2 */
-        ret = 0x0000000f;
+        ret = 0x0000000f
+            | (xhci->scratchpad_bufs & 0x1f) << 27      /* Max SP Bufs Lo */
+            | ((xhci->scratchpad_bufs >> 5) & 0x1f) << 21; /* Max SP Bufs Hi */
         break;
     case 0x0c: /* HCSPARAMS 3 */
         ret = 0x00000000;
@@ -2826,7 +2835,7 @@ static uint64_t xhci_cap_read(void *ptr, hwaddr reg, unsigned size)
     }
 
     trace_usb_xhci_cap_read(reg, ret);
-    return ret;
+    return ret >> shift;
 }
 
 static uint64_t xhci_port_read(void *ptr, hwaddr reg, unsigned size)

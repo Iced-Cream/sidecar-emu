@@ -16,9 +16,7 @@
 #define CLOCK_ISP_SIZE          0x100
 
 #define PCIE_RC_OFFSET          0x1500000
-#define PCIE_MMIO_OFFSET        0xc0000000
 #define PCIE_MMIO_ARM_OFFSET    0x600000000
-#define PCIE_MMIO_SIZE          0x40000000
 
 /* Lower peripheral base address on the VC (GPU) system bus */
 #define BCM2838_VC_PERI_LOW_BASE 0x7c000000
@@ -233,21 +231,13 @@ static void bcm2838_peripherals_realize(DeviceState *dev, Error **errp)
     regs_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie_host), 0);
     memory_region_add_subregion(&s->peri_low_mr, PCIE_RC_OFFSET, regs_mr);
     /*
-     * MMIO region.
-     *
-     * The BCM2711 PCIe controller translates addresses between the ARM and
-     * PCI address spaces: the DTB declares CPU 0x600000000 as mapping to PCI
-     * 0xc0000000. Map an alias of the PCI window starting at that PCI offset
-     * so accesses land on the right addresses; mapping the window directly
-     * would expose PCI address 0 at the ARM base instead, and every BAR
-     * behind the root port would be read at the wrong address.
+     * MMIO region: the controller's outbound window, CPU 0x600000000 to the
+     * PCIe address the guest programs (0xc0000000 until it does, as the DTB
+     * declares; see bcm2838_pcie_update_outbound()).
      */
-    mmio_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie_host), 1);
-    memory_region_init_alias(&s->pcie_mmio_alias, OBJECT(s),
-                             "bcm2838_pcie_mmio_alias", mmio_mr,
-                             PCIE_MMIO_OFFSET, PCIE_MMIO_SIZE);
+    mmio_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie_host), 3);
     memory_region_add_subregion(get_system_memory(), PCIE_MMIO_ARM_OFFSET,
-                                &s->pcie_mmio_alias);
+                                mmio_mr);
 
     /* Gigabit Ethernet */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->genet), errp)) {

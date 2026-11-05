@@ -189,6 +189,7 @@ typedef struct XHCIState {
     uint32_t numports_3;
     uint32_t numintrs;
     uint32_t numslots;
+    uint32_t scratchpad_bufs;   /* advertised in HCSPARAMS2, never touched */
     uint32_t flags;
     uint32_t max_pstreams_mask;
     void (*intr_update)(XHCIState *s, int n, bool enable);

@@ -119,12 +119,21 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
         case RPI_FWREQ_GET_CLOCK_RATE:
         case RPI_FWREQ_GET_MAX_CLOCK_RATE:
         case RPI_FWREQ_GET_MIN_CLOCK_RATE:
+        case RPI_FWREQ_GET_CLOCK_MEASURED:
             switch (ldl_le_phys(&s->dma_as, value + 12)) {
             case RPI_FIRMWARE_EMMC_CLK_ID:
                 stl_le_phys(&s->dma_as, value + 16, RPI_FIRMWARE_EMMC_CLK_RATE);
                 break;
             case RPI_FIRMWARE_UART_CLK_ID:
-                stl_le_phys(&s->dma_as, value + 16, RPI_FIRMWARE_UART_CLK_RATE);
+                /*
+                 * The Pi 4 firmware runs UART0 from a 48 MHz clock; a
+                 * 3 MHz clock gives guests that ask for fast baud rates
+                 * (921600) an integer divisor of 0.
+                 */
+                stl_le_phys(&s->dma_as, value + 16,
+                            ((s->board_rev >> 12) & 0xf) >= 3 /* BCM2711 */
+                            ? RPI_FIRMWARE_UART_CLK_RATE_BCM2711
+                            : RPI_FIRMWARE_UART_CLK_RATE);
                 break;
             case RPI_FIRMWARE_CORE_CLK_ID:
                 stl_le_phys(&s->dma_as, value + 16, RPI_FIRMWARE_CORE_CLK_RATE);
@@ -312,6 +321,16 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
                 address_space_write(&s->dma_as, value + 12,
                                     MEMTXATTRS_UNSPECIFIED, s->command_line,
                                     resplen);
+            break;
+
+        case RPI_FWREQ_SET_GPIO_STATE:
+            /* The firmware's GPIO expander (activity LED, power): no model */
+            resplen = 8;
+            break;
+
+        case RPI_FWREQ_NOTIFY_XHCI_RESET:
+            /* The VL805 model needs no firmware load after its reset */
+            resplen = 0;
             break;
 
         case RPI_FWREQ_GET_THROTTLED:

@@ -209,6 +209,7 @@ uint64_t board_ram_size(uint32_t board_rev);
 /* Clock rates */
 #define RPI_FIRMWARE_EMMC_CLK_RATE    50000000
 #define RPI_FIRMWARE_UART_CLK_RATE    3000000
+#define RPI_FIRMWARE_UART_CLK_RATE_BCM2711 48000000
 /*
  * TODO: this is really SoC-specific; we might want to
  * set it per-SoC if it turns out any guests care.

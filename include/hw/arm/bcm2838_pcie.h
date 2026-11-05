@@ -36,6 +36,13 @@ OBJECT_DECLARE_TYPE(BCM2838PcieRootState, BCM2838PcieRootClass,
 #define BCM2838_PCIE_EXT_CFG_DATA   0x8000
 #define BCM2838_PCIE_EXT_CFG_INDEX  0x9000
 
+/* CPU -> PCIe outbound window 0: PCIe address of the window's start */
+#define BCM2838_PCIE_MEM_WIN0_LO    0x400c
+#define BCM2838_PCIE_MEM_WIN0_HI    0x4010
+/* What the DTB declares and Linux programs: CPU 0x600000000 -> PCIe 0xc0000000 */
+#define BCM2838_PCIE_OUTBOUND_DEFAULT 0xc0000000ULL
+#define BCM2838_PCIE_OUTBOUND_SIZE  0x40000000ULL
+
 struct BCM2838PcieRootState {
     /*< private >*/
     PCIESlot parent_obj;
@@ -66,6 +73,12 @@ struct BCM2838PcieHostState {
     MemoryRegion io_mmio;
     MemoryRegion io_ioport_window;
     MemoryRegion io_mmio_window;
+    /*
+     * The CPU's view of the outbound window: an alias into io_mmio_window
+     * whose offset is the PCIe address the guest programs in MEM_WIN0
+     * (SysBus MMIO region 3).
+     */
+    MemoryRegion outbound_win;
 
     qemu_irq irq[BCM2838_PCIE_NUM_IRQS];
 };

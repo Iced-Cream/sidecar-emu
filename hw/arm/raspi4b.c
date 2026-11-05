@@ -21,6 +21,9 @@
 #include "hw/arm/boot.h"
 #include "qom/object.h"
 #include "hw/arm/bcm2838.h"
+#include "hw/pci/pci.h"
+#include "hw/pci/pci_bridge.h"
+#include "system/system.h"
 #include <libfdt.h>
 
 #define TYPE_RASPI4B_MACHINE MACHINE_TYPE_NAME("raspi4b")
@@ -82,6 +85,17 @@ static void raspi4b_machine_init(MachineState *machine)
                             board_soc_type(mc->board_rev));
 
     raspi_base_machine_init(machine, &soc->parent_obj);
+
+    /*
+     * The VL805 USB 3.0 controller sits in slot 0 behind the PCIe root port,
+     * as on the board (its four USB-A ports). -nodefaults leaves it out, for
+     * a different device in that slot.
+     */
+    if (defaults_enabled()) {
+        PCIBus *bus = pci_bridge_get_sec_bus(
+            PCI_BRIDGE(&soc->peripherals.pcie_host.root_port));
+        pci_create_simple(bus, PCI_DEVFN(0, 0), "vl805");
+    }
 }
 
 static void raspi4b_machine_class_init(ObjectClass *oc, const void *data)
