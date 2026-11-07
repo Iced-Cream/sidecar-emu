@@ -58,6 +58,9 @@ static void bcm2838_init(Object *obj)
                               "vcram-base");
     object_property_add_alias(obj, "command-line", OBJECT(&s->peripherals),
                               "command-line");
+    /* the SD card slot of the Pi 4 is EMMC2 (what Circle and Linux drive), not the legacy sd-bus mux */
+    object_property_add_alias(obj, "emmc2-bus", OBJECT(&s->peripherals.emmc2),
+                              "sd-bus");
 
     object_initialize_child(obj, "gic", &s->gic, TYPE_ARM_GIC);
 }
