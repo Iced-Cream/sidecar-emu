@@ -45,13 +45,17 @@ boot() {  # boot <dir> <seconds> <teensy opts> [teensystub args...]
 }
 # The engine reaches usb=mirror at very different uptimes (about 35 s in the cloud, 2.5 min on a busy PC), so the
 # steps wait for the relay's "box up" line rather than a fixed delay.
-box_up() {  # box_up <dir>: waits up to BOX_WAIT s (default 360) for the relay to have the box
-  for _ in $(seq 1 $(( ${BOX_WAIT:-360} / 2 ))); do grep -q "teensy: usb=mirror: box up" "$1/uart.log" 2>/dev/null && return 0; sleep 2; done
+box_up() {  # box_up <dir>: waits up to BOX_WAIT s (default 360) for the relay to have the box, or for the Pi to see
+  #                  the Teensy in HalfKay (start-halfkay: there is no relay until it has been flashed)
+  for _ in $(seq 1 $(( ${BOX_WAIT:-360} / 2 ))); do
+    grep -qE "teensy: usb=mirror: box up|teensyflash: a Teensy in its bootloader" "$1/uart.log" 2>/dev/null && return 0
+    sleep 2
+  done
   return 1
 }
 flash() {  # flash <dir> <expect>: prints done/failed line
   web_up || { echo "web never answered"; return; }
-  box_up "$1" || { echo "the relay never had the box"; return; }
+  box_up "$1" || { echo "the relay never had the box (nor the Pi a Teensy in HalfKay)"; return; }
   sleep 5
   python3 "$FW/tools/teensy_flash.py" "$O/test.hex" --host "127.0.0.1:$HTTP_PORT" --token none --expect "$2" \
     --timeout 120 > "$1/flash.log" 2>&1
