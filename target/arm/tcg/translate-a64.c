@@ -3531,10 +3531,28 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
         tcg_gen_setcond_i64(TCG_COND_NE, tmp, tmp, cpu_exclusive_val);
     }
     tcg_gen_mov_i64(cpu_reg(s, rd), tmp);
+#ifndef CONFIG_USER_ONLY
+    /*
+     * Sidecar: a store-exclusive that fails because another PE wrote the
+     * location: on hardware that store cleared this PE's global monitor,
+     * which sets its event register (ARM ARM D1.6.1 "the global monitor
+     * for the PE changes from Exclusive Access to Open Access"). QEMU
+     * does not model the monitor, so a spin lock that goes back to WFE
+     * after a failed STXR (Circle's CSpinLock::Acquire) slept until some
+     * unrelated SEV or IRQ. Set the event here instead.
+     */
+    {
+        TCGLabel *ok_label = gen_new_label();
+        tcg_gen_brcondi_i64(TCG_COND_EQ, tmp, 0, ok_label);
+        gen_event_reg();
+        gen_set_label(ok_label);
+    }
+#endif
     tcg_gen_br(done_label);
 
     gen_set_label(fail_label);
     tcg_gen_movi_i64(cpu_reg(s, rd), 1);
+    gen_event_reg();    /* Sidecar: as above (monitor already lost) */
     gen_set_label(done_label);
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
