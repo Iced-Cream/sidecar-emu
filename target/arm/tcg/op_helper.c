@@ -472,14 +472,38 @@ void HELPER(wfit)(CPUARMState *env, uint32_t rd)
 void HELPER(sev)(void)
 {
     CPUState *cs;
+    bool kick = false;
 
-    BQL_LOCK_GUARD();
-
+    /*
+     * Sidecar: set every event register without the BQL, and kick only the
+     * PEs that are halted (in WFE). Upstream took the BQL and kicked every
+     * other PE, so each SEV made every running vCPU leave its execution
+     * loop and take the BQL again: with the engine's ~17k SEV/s that was
+     * ~50k BQL round trips a second, most of the lock traffic that starved
+     * core 0 once usb-rytm streamed. A running PE needs no kick: its next
+     * WFE consumes the event (HELPER(wfe) reads the register first).
+     */
+    RCU_READ_LOCK_GUARD();
     CPU_FOREACH(cs) {
-        ARMCPU *target_cpu = ARM_CPU(cs);
-        target_cpu->env.event_register = true;
-        if (!qemu_cpu_is_self(cs)) {
-            qemu_cpu_kick(cs);
+        qatomic_set(&ARM_CPU(cs)->env.event_register, true);
+    }
+    smp_mb();   /* the registers before reading halted (pairs with wfe) */
+    CPU_FOREACH(cs) {
+        if (!qemu_cpu_is_self(cs) && qatomic_read(&cs->halted)) {
+            kick = true;
+        }
+    }
+    if (kick) {
+        /*
+         * As upstream for the halted ones: under the BQL, which the halt
+         * loop holds between its has-work check and its wait, so the
+         * wake-up cannot fall between the two.
+         */
+        BQL_LOCK_GUARD();
+        CPU_FOREACH(cs) {
+            if (!qemu_cpu_is_self(cs) && qatomic_read(&cs->halted)) {
+                qemu_cpu_kick(cs);
+            }
         }
     }
 }
@@ -611,6 +635,44 @@ void HELPER(wfe)(CPUARMState *env, uint32_t insn_len)
         raise_exception(env, excp, syn_wfx(1, 0xe, 0, false, WFE, insn_len == 2),
                         target_el);
     }
+
+    /*
+     * Sidecar: poll the event register for a short while before halting.
+     * A halt and its wake-up each take the BQL (the SEV that kicks a halted
+     * PE, then the halted thread's loop); the engine's cores sleep in WFE
+     * and are woken some 17k times a second, so with usb-rytm streaming
+     * those round trips crowded out core 0's MMIO. Most wake-ups come
+     * within tens of microseconds; caught here they cost no lock at all.
+     * An interrupt or an exit request ends the poll too (the halt would
+     * have woken for them). SIDECAR_WFE_SPIN_US (default 100, 0 = off).
+     */
+    {
+        static int spin_us = -1;
+        if (spin_us < 0) {
+            const char *e = getenv("SIDECAR_WFE_SPIN_US");
+            spin_us = e ? atoi(e) : 100;
+        }
+        if (spin_us > 0 && env->exclusive_addr == -1) {
+            int64_t end = get_clock() + spin_us * 1000LL;
+            unsigned n = 0;
+            while (!qatomic_read(&env->event_register)) {
+                if (qatomic_read(&cs->interrupt_request) ||
+                    qatomic_read(&cs->exit_request)) {
+                    return;
+                }
+                if ((++n & 63) == 0) {
+                    if (get_clock() > end) {
+                        goto sleep;
+                    }
+                    sched_yield();
+                }
+                cpu_relax();
+            }
+            qatomic_set(&env->event_register, false);
+            return;
+        }
+    }
+sleep:
 
     /*
      * If the CPU has entered the exclusive region we could sleep
