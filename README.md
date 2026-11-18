@@ -49,7 +49,24 @@ assistant, so none of it may be submitted to QEMU.
      render-core guard.
   8. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
      `configs/devices/aarch64-softmmu/sidecar.mak` enables only raspi4b,
-     usb-rytm, usb-hub and usb-hid.
+     usb-rytm, usb-teensy, usb-hub and usb-hid.
+  9. **usb-teensy** (`hw/usb/dev-teensy.c`). A stand-in for the Teensy 4.1
+     mirror relay, not an emulation of its chip or firmware: the link
+     (1209:0002, protocol 1.02 of sidecar-firmware `pi/engine/relay_proto.h`:
+     bulk event pipe, link audio, four channels, the forwarded control
+     requests, credits, stats, log, the bootloader request) and HalfKay
+     (16C0:0478: 1088-byte SET_REPORT blocks, erase refusals after block 0,
+     the start report, then the relay back with a new build). Its optional
+     chardev is the computer behind the relay (`sidecar/tools/teensystub.py`).
+     Fault options for the flows that failed on the unit: `bl-ignore`,
+     `bl-stay`, `drop-block=N`, `leave-quiet-ms=N` (every transfer ends in a
+     transaction error that long before the Teensy leaves), `start-halfkay`;
+     timings `enter-ms`, `halfkay-ms`, `erase-ms`, `boot-ms`, `connect-ms`;
+     builds `build=` and `flash-build=`.
+  10. **usb-hub,high-speed=on.** A USB 2.0 hub, as the Pi 4's on-board one
+     behind the VL805's single USB 2 port, so that usb-rytm and usb-teensy
+     (both high speed) can be plugged at once. QEMU's hub stays full speed
+     without it.
 
 ## Build
 
@@ -95,6 +112,14 @@ analog-emu's link.
   plugged and unplugged over QMP.
 - `sidecar/tools/hubfail.sh <kernel> <outdir> [cycles]`: a `fail-intr` hub
   unplugged at varied times; the engine must keep answering.
+- `sidecar/tools/teensystub.py [--port 7302]`: the computer behind usb-teensy.
+  With `TEENSY=127.0.0.1:7302` run-sidecar.sh plugs a high-speed hub with
+  usb-rytm on port 1 and usb-teensy on port 2; when the Pi shows the box
+  through the relay the stub enumerates it and sends the Rytm's Overbridge
+  vendor requests, which go relay -> Pi -> box and back. `TEENSY=none` plugs
+  usb-teensy with no computer. A Teensy flash through the Pi
+  (sidecar-firmware `tools/teensy_flash.py`, with `paircode=0` in the
+  emulator's cmdline) runs against usb-teensy as against the real relay.
 
 Kernels, analog-emu cards and anything else built from instrument firmware
 stay out of this repository.

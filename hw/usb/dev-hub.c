@@ -48,6 +48,7 @@ struct USBHubState {
     uint32_t num_ports;
     bool port_power;
     bool fail_intr;     /* test: every status-change poll ends in a transaction error */
+    bool high_speed;    /* a USB 2.0 hub: high-speed devices downstream (the Pi 4's VL805 hub) */
     QEMUTimer *port_timer;
     USBHubPort ports[MAX_PORTS];
 };
@@ -154,6 +155,57 @@ static const USBDesc desc_hub = {
     .str  = desc_strings,
 };
 
+/*
+ * high-speed=on: a USB 2.0 hub (single TT), so that high-speed devices can sit
+ * behind it as they do behind the Pi 4's on-board hub (usb-rytm and usb-teensy
+ * at once; the VL805 has one USB 2 root port). Not a model of the TT: the
+ * downstream devices keep their own speed.
+ */
+static const USBDescIface desc_iface_hub_hs = {
+    .bInterfaceNumber              = 0,
+    .bNumEndpoints                 = 1,
+    .bInterfaceClass               = USB_CLASS_HUB,
+    .eps = (USBDescEndpoint[]) {
+        {
+            .bEndpointAddress      = USB_DIR_IN | 0x01,
+            .bmAttributes          = USB_ENDPOINT_XFER_INT,
+            .wMaxPacketSize        = 1 + DIV_ROUND_UP(MAX_PORTS, 8),
+            .bInterval             = 12,
+        },
+    }
+};
+
+static const USBDescDevice desc_device_hub_hs = {
+    .bcdUSB                        = 0x0200,
+    .bDeviceClass                  = USB_CLASS_HUB,
+    .bDeviceProtocol               = 1,             /* single TT */
+    .bMaxPacketSize0               = 64,
+    .bNumConfigurations            = 1,
+    .confs = (USBDescConfig[]) {
+        {
+            .bNumInterfaces        = 1,
+            .bConfigurationValue   = 1,
+            .bmAttributes          = USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER |
+                                     USB_CFG_ATT_WAKEUP,
+            .nif = 1,
+            .ifs = &desc_iface_hub_hs,
+        },
+    },
+};
+
+static const USBDesc desc_hub_hs = {
+    .id = {
+        .idVendor          = 0x0409,
+        .idProduct         = 0x55aa,
+        .bcdDevice         = 0x0101,
+        .iManufacturer     = STR_MANUFACTURER,
+        .iProduct          = STR_PRODUCT,
+        .iSerialNumber     = STR_SERIALNUMBER,
+    },
+    .high = &desc_device_hub_hs,
+    .str  = desc_strings,
+};
+
 static const uint8_t qemu_hub_hub_descriptor[] =
 {
         0x00,                   /*  u8  bLength; patched in later */
@@ -206,6 +258,11 @@ static bool usb_hub_port_update(USBHubPort *port)
             usb_hub_port_set(port, PORT_STAT_LOW_SPEED);
         } else {
             usb_hub_port_clear(port, PORT_STAT_LOW_SPEED);
+        }
+        if (port->port.dev->speed == USB_SPEED_HIGH) {
+            usb_hub_port_set(port, PORT_STAT_HIGH_SPEED);
+        } else {
+            usb_hub_port_clear(port, PORT_STAT_HIGH_SPEED);
         }
     }
     return notify;
@@ -610,6 +667,9 @@ static void usb_hub_realize(USBDevice *dev, Error **errp)
         return;
     }
 
+    if (s->high_speed) {
+        dev->usb_desc = &desc_hub_hs;
+    }
     usb_desc_create_serial(dev);
     usb_desc_init(dev);
     s->port_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
@@ -619,7 +679,8 @@ static void usb_hub_realize(USBDevice *dev, Error **errp)
         port = &s->ports[i];
         usb_register_port(usb_bus_from_device(dev),
                           &port->port, s, i, &usb_hub_port_ops,
-                          USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
+                          USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL |
+                          (s->high_speed ? USB_SPEED_MASK_HIGH : 0));
         usb_port_location(&port->port, dev->port, i+1);
     }
     usb_hub_handle_reset(dev);
@@ -674,6 +735,7 @@ static const Property usb_hub_properties[] = {
     DEFINE_PROP_UINT32("ports", USBHubState, num_ports, 8),
     DEFINE_PROP_BOOL("port-power", USBHubState, port_power, false),
     DEFINE_PROP_BOOL("fail-intr", USBHubState, fail_intr, false),
+    DEFINE_PROP_BOOL("high-speed", USBHubState, high_speed, false),
 };
 
 static void usb_hub_class_initfn(ObjectClass *klass, const void *data)
@@ -682,6 +744,7 @@ static void usb_hub_class_initfn(ObjectClass *klass, const void *data)
     USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
 
     uc->realize        = usb_hub_realize;
+    uc->handle_attach  = usb_desc_attach;   /* high-speed=on: the .high set */
     uc->product_desc   = "QEMU USB Hub";
     uc->usb_desc       = &desc_hub;
     uc->find_device    = usb_hub_find_device;

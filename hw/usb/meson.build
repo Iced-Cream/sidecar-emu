@@ -18,6 +18,7 @@ system_ss.add(when: 'CONFIG_USB_XHCI_PCI', if_true: files('hcd-xhci-pci.c'))
 system_ss.add(when: 'CONFIG_USB_XHCI_VL805', if_true: files('hcd-xhci-vl805.c'))
 system_ss.add(when: 'CONFIG_USB_MIDI_CODEC', if_true: files('usbmidi-codec.c'))
 system_ss.add(when: 'CONFIG_USB_RYTM', if_true: files('dev-rytm.c'))
+system_ss.add(when: 'CONFIG_USB_TEENSY', if_true: files('dev-teensy.c'))
 system_ss.add(when: 'CONFIG_USB_DWC2', if_true: files('hcd-dwc2.c', 'dwc2-gadget.c'))
 
 

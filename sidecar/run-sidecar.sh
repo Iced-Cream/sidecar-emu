@@ -8,6 +8,14 @@
 #                empty = no usb-rytm (default 127.0.0.1:7301)
 #   GADGET_PORT  TCP port for the USB-C gadget's raw MIDI, one client at a time,
 #                e.g. elkflash --port tcp:127.0.0.1:7400; empty = gadget off (default 7400)
+#                With TEENSY set, a high-speed usb-hub goes on the VL805's USB 2
+#                port (as the Pi 4's on-board hub) with usb-rytm on its port 1
+#                and usb-teensy on its port 2
+#   TEENSY       host:port of sidecar/tools/teensystub.py (the computer behind
+#                the relay); empty = no usb-teensy (default empty). TEENSY=none
+#                plugs usb-teensy with no computer behind it
+#   TEENSY_OPTS  more usb-teensy properties, comma-separated (e.g.
+#                flash-build=abc1234,drop-block=5; hw/usb/dev-teensy.c)
 #   UART         file for the engine's UART log (default uart.log)
 #   WATCHDOG     off = the Pi's watchdog never fires on a missed pat; reboots
 #                the guest asks for (a short timeout) still happen (default on)
@@ -35,9 +43,21 @@ if [ -n "$GADGET_PORT" ]; then
   args+=(-chardev "socket,id=gm,host=127.0.0.1,port=$GADGET_PORT,server=on,wait=off"
          -global dwc2-usb.gadget-chardev=gm)
 fi
+TEENSY=${TEENSY:-}
+rport=() tport=()
+if [ -n "$TEENSY" ]; then
+  args+=(-device usb-hub,id=pihub,bus=usb-bus.1,port=1,high-speed=on,ports=4)
+  rport=(,bus=usb-bus.1,port=1.1) tport=(,bus=usb-bus.1,port=1.2)
+fi
 if [ -n "$LINK" ]; then
   args+=(-chardev "socket,id=rl,host=${LINK%:*},port=${LINK##*:},reconnect-ms=1000"
-         -device usb-rytm,chardev=rl)
+         -device "usb-rytm,chardev=rl${rport[*]}")
+fi
+if [ "$TEENSY" = none ]; then
+  args+=(-device "usb-teensy${tport[*]}${TEENSY_OPTS:+,$TEENSY_OPTS}")
+elif [ -n "$TEENSY" ]; then
+  args+=(-chardev "socket,id=tl,host=${TEENSY%:*},port=${TEENSY##*:},reconnect-ms=1000"
+         -device "usb-teensy,chardev=tl${tport[*]}${TEENSY_OPTS:+,$TEENSY_OPTS}")
 fi
 # shellcheck disable=SC2086
 pin=()
