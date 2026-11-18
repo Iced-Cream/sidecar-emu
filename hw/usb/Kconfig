@@ -62,6 +62,11 @@ config USB_RYTM
     depends on USB
     select USB_MIDI_CODEC
 
+config USB_TEENSY
+    bool
+    default y
+    depends on USB
+
 config USB_XHCI_SYSBUS
     bool
     select USB_XHCI
