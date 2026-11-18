@@ -10,11 +10,11 @@ optionally SET_INTERFACE alt 3 on interfaces 1 and 2 and the computer's audio OU
 and a line a second with what it got.
 
   python3 sidecar/tools/teensystub.py [--port 7302] [--audio] [--flash-build NAME] [--button-at S] [--replug-at S]
-                                      [--exit-after S] [--json FILE]
+                                      [--exit-after S] [--exit-after-shown S] [--json FILE]
 
 --flash-build sets the build the next flash comes back with ('B'); --button-at presses the program button S seconds
 after the start (the Teensy enters HalfKay: the Pi's recovery path), --replug-at unplugs the Teensy and plugs it back
-2 s later. --json writes the counters and every forwarded answer at the end (for gate scripts).
+2 s later. --exit-after-shown ends S seconds after the relay first shows a box (boot times vary). --json writes the counters and every forwarded answer at the end (for gate scripts).
 
 Frames both ways: [kind u8][length u16 LE][payload] (dev-teensy.c's header comment).
 """
@@ -173,9 +173,12 @@ class Computer:
         done_button = done_replug = False
         last = 0
         audio = None
+        first_shown = None
         while not self.stop:
             if self.shown.wait(0.2):
                 self.shown.clear()
+                if first_shown is None:
+                    first_shown = time.time()
                 time.sleep(0.1)
                 self.enumerate()
                 if self.a.audio and audio is None:
@@ -199,6 +202,8 @@ class Computer:
                       self.st["enumerations"], self.st["in_packets"]), flush=True)
             if self.a.exit_after and now >= self.a.exit_after:
                 break
+            if self.a.exit_after_shown and first_shown and time.time() - first_shown >= self.a.exit_after_shown:
+                break
         self.stop = True
 
 
@@ -210,6 +215,7 @@ def main():
     ap.add_argument("--button-at", type=float)
     ap.add_argument("--replug-at", type=float)
     ap.add_argument("--exit-after", type=float, default=0)
+    ap.add_argument("--exit-after-shown", type=float, default=0)
     ap.add_argument("--json")
     a = ap.parse_args()
     srv = socket.socket()

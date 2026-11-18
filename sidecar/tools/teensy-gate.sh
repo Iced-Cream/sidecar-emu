@@ -43,11 +43,18 @@ boot() {  # boot <dir> <seconds> <teensy opts> [teensystub args...]
   UART=$d/uart.log GADGET_PORT=7400 WATCHDOG=off TEENSY=127.0.0.1:7302 TEENSY_OPTS=$opts \
     timeout "$s" "$T/../run-sidecar.sh" "$K" "$WORDS" > "$d/qemu.out" 2>&1 & pids+=($!)
 }
+# The engine reaches usb=mirror at very different uptimes (about 35 s in the cloud, 2.5 min on a busy PC), so the
+# steps wait for the relay's "box up" line rather than a fixed delay.
+box_up() {  # box_up <dir>: waits up to BOX_WAIT s (default 360) for the relay to have the box
+  for _ in $(seq 1 $(( ${BOX_WAIT:-360} / 2 ))); do grep -q "teensy: usb=mirror: box up" "$1/uart.log" 2>/dev/null && return 0; sleep 2; done
+  return 1
+}
 flash() {  # flash <dir> <expect>: prints done/failed line
   web_up || { echo "web never answered"; return; }
-  sleep 12
+  box_up "$1" || { echo "the relay never had the box"; return; }
+  sleep 5
   python3 "$FW/tools/teensy_flash.py" "$O/test.hex" --host "127.0.0.1:$HTTP_PORT" --token none --expect "$2" \
-    --timeout 80 > "$1/flash.log" 2>&1
+    --timeout 120 > "$1/flash.log" 2>&1
   grep -E "^done|^failed|timed out" "$1/flash.log" | tail -1
 }
 fails=0
@@ -56,7 +63,7 @@ judge() { case $3 in "$2"*) echo "$1: PASS ($3)";; *) echo "$1: FAIL ($3; wanted
 # STEPS="mirror flash ..." runs only those steps (default: all)
 # 1. mirror + ctl forwarding + audio
 if [[ " ${STEPS:-mirror} " == *" mirror "* ]]; then
-boot "$O/mirror" 150 "" --audio --exit-after 140
+boot "$O/mirror" 520 "" --audio --exit-after 500 --exit-after-shown 100
 wait "${pids[2]}" 2>/dev/null; stop_all
 python3 - "$O/mirror" <<'PY' | tee "$O/mirror/result.txt"
 import json, sys
@@ -79,14 +86,14 @@ fi
 # whose boot had such a reboot and did not get its result runs once more, and says so.
 run_flash() {  # run_flash <name> <teensy opts> <expect> <wanted result prefix>
   case " ${STEPS:-$1} " in *" $1 "*) ;; *) return;; esac
-  boot "$O/$1" 400 "$2"
+  boot "$O/$1" 600 "$2"
   r=$(flash "$O/$1" "$3")
   stop_all
   case $r in "$4"*) ;; *)
     if grep -q "engine: reboot:" "$O/$1/uart.log" 2>/dev/null; then
       echo "$1: the engine rebooted itself during the boot ($(grep -m1 -o 'engine: reboot: .*' "$O/$1/uart.log")): once more"
       mv "$O/$1" "$O/$1-try1"
-      boot "$O/$1" 400 "$2"
+      boot "$O/$1" 600 "$2"
       r=$(flash "$O/$1" "$3")
       stop_all
     fi;;
