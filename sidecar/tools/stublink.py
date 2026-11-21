@@ -1,6 +1,13 @@
 # A stand-in for rytm-emu's Overbridge link server (oblink.rs protocol), for testing usb-rytm without firmware.
 import socket, struct, sys, time, threading, math
-port = int(sys.argv[1]) if len(sys.argv) > 1 else 7301
+# usage: stublink.py [port] [--hello ID]: ID is the box id the stub says hello with 6 s after the host connects
+# (sidecar-firmware core/device: 3 = Analog Four MKII, 2 = Digitakt; default 7, an id with no profile); 0 = no hello,
+# as a stock Rytm.
+args = [a for a in sys.argv[1:]]
+hello_id = 7
+if '--hello' in args:
+    i = args.index('--hello'); hello_id = int(args[i + 1]); del args[i:i + 2]
+port = int(args[0]) if args else 7301
 srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(('127.0.0.1', port)); srv.listen(1)
 st = dict(A=0, M=0, H=None, Mbytes=b'')
 def reader(c):
@@ -38,9 +45,9 @@ while True:
             if due > 0:
                 fr = b''.join(struct.pack('<12i', *([int(1e9 * math.sin(2 * math.pi * 1000 * (sent + i) / 48000))] * 2 + [0] * 10)) for i in range(due))
                 c.sendall(b'R' + struct.pack('<I', due) + fr + b'N' + struct.pack('<I', due)); sent += due
-            if 'h' not in st and time.time() - t0 > 6:
+            if hello_id and 'h' not in st and time.time() - t0 > 6:
                 st['h'] = 1
-                hel = bytes([0xf8, 0xf0, 0x7d, 0x52, 0x54, 0x4f, 0x01, 0x00, 0x07, 0x01, 0xf7, 0xfe])   # clock, the device hello, active sensing
+                hel = bytes([0xf8, 0xf0, 0x7d, 0x52, 0x54, 0x4f, 0x01, hello_id >> 7, hello_id & 0x7f, 0x01, 0xf7, 0xfe])   # clock, the device hello, active sensing
                 c.sendall(b'M' + struct.pack('<H', 4) + hel[:4] + b'M' + struct.pack('<H', len(hel) - 4) + hel[4:])
                 print('sent hello', flush=True)
             if int(time.time() - t0) != int(time.time() - t0 - 0.01):

@@ -49,7 +49,7 @@ assistant, so none of it may be submitted to QEMU.
      render-core guard.
   8. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
      `configs/devices/aarch64-softmmu/sidecar.mak` enables only raspi4b,
-     usb-rytm, usb-teensy, usb-hub and usb-hid.
+     usb-rytm (and usb-a4), usb-teensy, usb-hub and usb-hid.
   9. **usb-teensy** (`hw/usb/dev-teensy.c`). A stand-in for the Teensy 4.1
      mirror relay, not an emulation of its chip or firmware: the link
      (1209:0002, protocol 1.02 of sidecar-firmware `pi/engine/relay_proto.h`:
@@ -66,7 +66,17 @@ assistant, so none of it may be submitted to QEMU.
   10. **usb-hub,high-speed=on.** A USB 2.0 hub, as the Pi 4's on-board one
      behind the VL805's single USB 2 port, so that usb-rytm and usb-teensy
      (both high speed) can be plugged at once. QEMU's hub stays full speed
-     without it.
+     without it. It carries the board hub's ids (VIA Labs 2109:3431).
+  11. **SD card on EMMC2.** `-drive if=sd` goes into EMMC2, the Pi 4's card
+     slot (what Circle drives), instead of the legacy sdhci/sdhost mux, so
+     the engine has a card (`CARD=` for run-sidecar.sh,
+     `sidecar/tools/mkcard.sh` makes a 256 MB FAT32 one).
+  12. **usb-a4** (in `hw/usb/dev-rytm.c`). An Analog Four MKII stand-in
+     (1935:0b47, product "Analog Four MKII") on the same link protocol as
+     usb-rytm: alternate 3 blocks of 256 B in (8 channels) and 200 B out
+     (6 channels), its own serial and uid. With usb-rytm it makes the
+     two-box Pi (`A4_LINK=` for run-sidecar.sh). Each box attaches when its
+     link connects and detaches when it closes.
 
 ## Build
 
@@ -120,6 +130,18 @@ analog-emu's link.
   usb-teensy with no computer. A Teensy flash through the Pi
   (sidecar-firmware `tools/teensy_flash.py`, with `paircode=0` in the
   emulator's cmdline) runs against usb-teensy as against the real relay.
+
+- `sidecar/tools/twobox-gate.py <kernel> <outdir> [--expect-folders]`: two
+  boxes on one Pi (usb-rytm and usb-a4 behind the board hub, each on its own
+  stublink, a fresh card). Step `rytm-a4`: the Rytm at boot, the A4 plugged
+  second, unplugged and plugged back; `a4-rytm` the same the other way
+  round; `again` boots on the first step's card. It judges the emulator
+  (QEMU's attached boxes at each step, /status, a readable card, no
+  panic/assert) and records the engine's /status, UART lines and card
+  folders (`/.rytm`, `/.a4`, `/.sidecar`) in each step's `summary.json`;
+  `--expect-folders` adds `/.rytm` and `/.a4` to the pass. The A4's stub
+  says hello with box id 3 (`stublink.py --hello 3`), the Rytm's none.
+  Digitakt: not modelled (no usb-digitakt, no link for it in analog-emu).
 
 Kernels, analog-emu cards and anything else built from instrument firmware
 stay out of this repository.

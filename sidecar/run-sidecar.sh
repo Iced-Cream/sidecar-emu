@@ -8,14 +8,24 @@
 #                empty = no usb-rytm (default 127.0.0.1:7301)
 #   GADGET_PORT  TCP port for the USB-C gadget's raw MIDI, one client at a time,
 #                e.g. elkflash --port tcp:127.0.0.1:7400; empty = gadget off (default 7400)
-#                With TEENSY set, a high-speed usb-hub goes on the VL805's USB 2
+#                With TEENSY or A4_LINK set, a high-speed usb-hub goes on the VL805's USB 2
 #                port (as the Pi 4's on-board hub) with usb-rytm on its port 1
-#                and usb-teensy on its port 2
+#                and usb-teensy on its port 2 (usb-a4 on port 3)
 #   TEENSY       host:port of sidecar/tools/teensystub.py (the computer behind
 #                the relay); empty = no usb-teensy (default empty). TEENSY=none
 #                plugs usb-teensy with no computer behind it
 #   TEENSY_OPTS  more usb-teensy properties, comma-separated (e.g.
 #                flash-build=abc1234,drop-block=5; hw/usb/dev-teensy.c)
+#   A4_LINK      host:port of a second box's link (analog-emu's A4 --ob-link, or
+#                tools/stublink.py): plugs usb-a4 (1935:0b47) on port 3 of the
+#                high-speed hub, with usb-rytm on port 1 (default empty = no A4).
+#                The boxes attach when their links connect and detach when they
+#                close, so starting and stopping the links sets the attach order
+#   CARD         raw SD card image for EMMC2 (tools/mkcard.sh makes one); the
+#                engine's folders (/.rytm, /.a4, /.sidecar) land there
+#                (default empty = no card)
+#   QMP          unix socket path for a QMP monitor (tools/qmp.py, or
+#                tools/twobox-gate.py); default empty = none
 #   UART         file for the engine's UART log (default uart.log)
 #   WATCHDOG     off = the Pi's watchdog never fires on a missed pat; reboots
 #                the guest asks for (a short timeout) still happen (default on)
@@ -43,15 +53,26 @@ if [ -n "$GADGET_PORT" ]; then
   args+=(-chardev "socket,id=gm,host=127.0.0.1,port=$GADGET_PORT,server=on,wait=off"
          -global dwc2-usb.gadget-chardev=gm)
 fi
+if [ -n "${CARD:-}" ]; then
+  args+=(-drive "if=sd,format=raw,file=$CARD")
+fi
+if [ -n "${QMP:-}" ]; then
+  args+=(-qmp "unix:$QMP,server=on,wait=off")
+fi
 TEENSY=${TEENSY:-}
-rport=() tport=()
-if [ -n "$TEENSY" ]; then
+A4_LINK=${A4_LINK:-}
+rport=() tport=() aport=()
+if [ -n "$TEENSY" ] || [ -n "$A4_LINK" ]; then
   args+=(-device usb-hub,id=pihub,bus=usb-bus.1,port=1,high-speed=on,ports=4)
-  rport=(,bus=usb-bus.1,port=1.1) tport=(,bus=usb-bus.1,port=1.2)
+  rport=(,bus=usb-bus.1,port=1.1) tport=(,bus=usb-bus.1,port=1.2) aport=(,bus=usb-bus.1,port=1.3)
+fi
+if [ -n "$A4_LINK" ]; then
+  args+=(-chardev "socket,id=al,host=${A4_LINK%:*},port=${A4_LINK##*:},reconnect-ms=1000"
+         -device "usb-a4,id=a4,chardev=al${aport[*]}")
 fi
 if [ -n "$LINK" ]; then
   args+=(-chardev "socket,id=rl,host=${LINK%:*},port=${LINK##*:},reconnect-ms=1000"
-         -device "usb-rytm,chardev=rl${rport[*]}")
+         -device "usb-rytm,id=rytm,chardev=rl${rport[*]}")
 fi
 if [ "$TEENSY" = none ]; then
   args+=(-device "usb-teensy${tport[*]}${TEENSY_OPTS:+,$TEENSY_OPTS}")
