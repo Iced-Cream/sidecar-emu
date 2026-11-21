@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""twobox-gate.py: two boxes on one emulated Pi, in both attach orders, with a detach and reattach and an SD card.
+
+A Sidecar kernel on raspi4b with usb-rytm and usb-a4 behind the high-speed board hub (run-sidecar.sh with LINK and
+A4_LINK), a fresh FAT32 card on EMMC2 (CARD), and QMP (QMP). Each box's link is a stublink.py; a box attaches when its
+link starts and detaches when it stops, so the script sets the attach order by starting the links in turn:
+
+  rytm-a4   Rytm at boot, A4 once the web answers (+ATTACH_GAP s), A4 unplugged and plugged back
+  a4-rytm   A4 at boot, Rytm once the web answers (+ATTACH_GAP s), Rytm unplugged and plugged back
+  again     a boot on rytm-a4's card with both boxes, so what the first boot saved is read back
+
+One QEMU at a time. After each step each box's `attached` property is read over QMP (the emulator's own view of what is plugged),
+/status is logged whenever it changes, and after QEMU stops the card's /, /.rytm, /.a4 and /.sidecar are listed.
+
+The script judges the emulator only (PASS/FAIL lines): the boxes QEMU shows match each step, /status answers, the card
+holds a readable FAT, no panic/assert in the UART log. What the engine does with the boxes (its slots, its folders)
+is recorded in each step's summary.json and status.log for the kernel's own gate to judge; --expect-folders makes
+the card's /.rytm and /.a4 part of the PASS.
+
+  sidecar/tools/twobox-gate.py KERNEL OUTDIR [--words "..."] [--steps rytm-a4,a4-rytm,again] [--expect-folders]
+Environment: QEMU, CPUS, HTTP_PORT (default 18118) as run-sidecar.sh; ATTACH_GAP (default 20), HOLD (default 30:
+seconds between the events after the second attach), WEB_WAIT (default 300). Kills only the processes it started.
+"""
+import argparse, json, os, re, signal, socket, subprocess, sys, time, urllib.request
+
+T = os.path.dirname(os.path.abspath(__file__))
+P = argparse.ArgumentParser()
+P.add_argument("kernel"); P.add_argument("outdir")
+P.add_argument("--words", default="sdport=0 display=0 bench=0 blocklimit=1000")
+P.add_argument("--steps", default="rytm-a4,a4-rytm,again")
+P.add_argument("--expect-folders", action="store_true")
+A = P.parse_args()
+HTTP = int(os.environ.get("HTTP_PORT", "18118"))
+GAP = float(os.environ.get("ATTACH_GAP", "20"))
+HOLD = float(os.environ.get("HOLD", "30"))
+WEB_WAIT = float(os.environ.get("WEB_WAIT", "300"))
+LINKS = {"rytm": 7301, "a4": 7311}
+HELLO = {"rytm": 0, "a4": 3}      # a stock Rytm never says hello; the A4 companion says hello with id 3
+DEV = ("rytm", "a4")            # the QEMU device ids run-sidecar.sh gives them
+os.makedirs(A.outdir, exist_ok=True)
+fails = []
+
+
+class Step:
+    def __init__(self, name, card):
+        self.name, self.card = name, card
+        self.d = os.path.join(A.outdir, name); os.makedirs(self.d, exist_ok=True)
+        self.t0 = time.time(); self.log_f = open(os.path.join(self.d, "run.log"), "w")
+        self.stubs, self.qemu, self.qmp = {}, None, None
+        self.status_f = open(os.path.join(self.d, "status.log"), "w"); self.last = None
+        self.summary = {"step": self.name, "events": []}
+
+    def log(self, *a):
+        s = f"{time.time() - self.t0:7.1f} " + " ".join(str(x) for x in a)
+        print(f"[{self.name}] {s}", flush=True); self.log_f.write(s + "\n"); self.log_f.flush()
+
+    def check(self, what, ok, detail=""):
+        self.log(("PASS " if ok else "FAIL ") + what, detail)
+        if not ok:
+            fails.append(f"{self.name}: {what} {detail}")
+
+    # the links
+    def plug(self, box):
+        n = sum(1 for e in self.summary["events"] if e[1] == "plug " + box) + 1
+        f = open(os.path.join(self.d, f"stublink-{box}{n}.log"), "w")
+        self.stubs[box] = subprocess.Popen([sys.executable, os.path.join(T, "stublink.py"), str(LINKS[box]),
+                                            "--hello", str(HELLO[box])],
+                                           stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+        self.event("plug " + box)
+
+    def unplug(self, box):
+        p = self.stubs.pop(box)
+        os.killpg(p.pid, signal.SIGTERM); p.wait(timeout=10)
+        self.event("unplug " + box)
+
+    def event(self, what):
+        self.log(what); self.summary["events"].append([round(time.time() - self.t0, 1), what])
+
+    # QEMU
+    def boot(self):
+        env = dict(os.environ, LINK=f"127.0.0.1:{LINKS['rytm']}", A4_LINK=f"127.0.0.1:{LINKS['a4']}",
+                   CARD=self.card, QMP=os.path.join(self.d, "qmp.sock"), UART=os.path.join(self.d, "uart.log"),
+                   GADGET_PORT="", WATCHDOG="off", HTTP_PORT=str(HTTP))
+        words = f"{A.words} paircode=0".strip()
+        self.qemu = subprocess.Popen([os.path.join(T, "..", "run-sidecar.sh"), A.kernel, words], env=env,
+                                     stdout=open(os.path.join(self.d, "qemu.out"), "w"), stderr=subprocess.STDOUT,
+                                     start_new_session=True)
+        self.event("qemu started")
+        for _ in range(100):
+            if os.path.exists(os.path.join(self.d, "qmp.sock")):
+                break
+            time.sleep(0.1)
+        s = socket.socket(socket.AF_UNIX); s.connect(os.path.join(self.d, "qmp.sock"))
+        self.qmp = s.makefile("rw"); self.qmp.readline(); self.qmp_call("qmp_capabilities")
+
+    def qmp_call(self, cmd, args=None):
+        self.qmp.write(json.dumps({"execute": cmd, "arguments": args or {}}) + "\n"); self.qmp.flush()
+        while True:
+            r = json.loads(self.qmp.readline())
+            if "return" in r or "error" in r:
+                return r
+
+    def usb(self):
+        """the boxes QEMU has attached (each device's `attached` property over QMP)"""
+        got = []
+        for b in DEV:
+            r = self.qmp_call("qom-get", {"path": f"/machine/peripheral/{b}", "property": "attached"})
+            if r.get("return") is True:
+                got.append(b)
+        open(os.path.join(self.d, "attached.log"), "a").write(f"{time.time() - self.t0:.1f} {got}\n")
+        return sorted(got)
+
+    def expect_usb(self, want, why):
+        got = []
+        for _ in range(20):        # a reconnect takes up to reconnect-ms (1 s)
+            got = self.usb()
+            if got == sorted(want):
+                break
+            time.sleep(0.5)
+        self.check(f"QEMU shows {sorted(want) or 'no box'} {why}", got == sorted(want), f"(attached: {got})")
+
+    def status(self):
+        r = urllib.request.Request(f"http://127.0.0.1:{HTTP}/status",
+                                   headers={"Host": "10.0.2.15", "Origin": "http://10.0.2.15"})
+        return json.loads(urllib.request.urlopen(r, timeout=5).read())
+
+    def poll(self, secs):
+        """poll /status for secs, logging each change; returns the last answer (or None)"""
+        end, st = time.time() + secs, None
+        while time.time() < end:
+            if self.qemu.poll() is not None:
+                self.log("qemu exited", self.qemu.returncode); return st
+            try:
+                st = self.status()
+                pick = {k: st.get(k) for k in ("slots", "device", "link", "streaming", "rytmMidi", "usbmidi",
+                                               "mirror", "slotFx") if k in st}
+                s = json.dumps(pick, sort_keys=True)
+                if s != self.last:
+                    self.status_f.write(f"{time.time() - self.t0:.1f} {s}\n"); self.status_f.flush(); self.last = s
+            except Exception:
+                pass
+            time.sleep(2)
+        return st
+
+    def web_up(self):
+        end = time.time() + WEB_WAIT
+        while time.time() < end and self.qemu.poll() is None:
+            try:
+                self.status(); self.event("web up"); return True
+            except Exception:
+                time.sleep(2)
+        return False
+
+    def finish(self):
+        st = None
+        try:
+            st = self.status()
+            json.dump(st, open(os.path.join(self.d, "status.json"), "w"), indent=1)
+        except Exception as e:
+            self.log("/status at the end:", e)
+        self.check("/status answers at the end", st is not None)
+        self.summary["slots_at_end"] = st.get("slots") if st else None
+        if self.qemu.poll() is None:
+            os.killpg(self.qemu.pid, signal.SIGTERM)
+            try:
+                self.qemu.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.qemu.pid, signal.SIGKILL); self.qemu.wait()
+        for b in list(self.stubs):
+            self.unplug(b)
+        env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
+        listing = {}
+        for d in ("::/", "::/.rytm", "::/.a4", "::/.sidecar"):
+            r = subprocess.run(["mdir", "-a", "-b", "-i", self.card + "@@1M", d], capture_output=True, text=True,
+                               env=env)
+            listing[d[2:]] = r.stdout.split() if r.returncode == 0 else None
+        self.summary["card"] = listing
+        self.check("the card holds a readable FAT", listing["/"] is not None)
+        folders = {f: listing[f] is not None for f in ("/.rytm", "/.a4", "/.sidecar")}
+        self.summary["folders"] = folders
+        self.log("card folders:", folders)
+        if A.expect_folders:
+            self.check("the card has /.rytm and /.a4", folders["/.rytm"] and folders["/.a4"])
+        uart = open(os.path.join(self.d, "uart.log"), errors="replace").read() if os.path.exists(
+            os.path.join(self.d, "uart.log")) else ""
+        bad = [l for l in uart.splitlines() if re.search(r"panic|assert", l, re.I)]
+        self.check("no panic/assert in the UART log", not bad, bad[0][:200] if bad else "")
+        pat = re.compile(r"device: |slot|hello|claimed|attach|detach|release|/\.(rytm|a4|sidecar)", re.I)
+        open(os.path.join(self.d, "uart-picked.log"), "w").write(
+            "\n".join(l for l in uart.splitlines() if pat.search(l)) + "\n")
+        self.summary["reboots"] = len(re.findall(r"engine: reboot:", uart))
+        json.dump(self.summary, open(os.path.join(self.d, "summary.json"), "w"), indent=1)
+
+
+def two_orders(first, second):
+    name = f"{first}-{second}"
+    st = Step(name, os.path.join(A.outdir, name, "card.img"))
+    subprocess.run([os.path.join(T, "mkcard.sh"), st.card], check=True, stdout=subprocess.DEVNULL)
+    try:
+        st.plug(first); st.boot()
+        st.expect_usb([first], f"with only the {first} plugged")
+        st.check("/status answers", st.web_up())
+        st.poll(GAP)
+        st.plug(second); st.expect_usb([first, second], f"after the {second} is plugged second")
+        st.poll(HOLD)
+        st.unplug(second); st.expect_usb([first], f"after the {second} is unplugged")
+        st.poll(HOLD)
+        st.plug(second); st.expect_usb([first, second], f"after the {second} is plugged back")
+        st.poll(HOLD)
+    finally:
+        st.finish()
+    return st
+
+
+def again():
+    card = os.path.join(A.outdir, "rytm-a4", "card.img")
+    if not os.path.exists(card):
+        print("[again] needs the rytm-a4 step's card; skipped"); return
+    st = Step("again", card)
+    try:
+        st.plug("rytm"); st.plug("a4"); st.boot()
+        st.expect_usb(["rytm", "a4"], "with both plugged at boot")
+        st.check("/status answers", st.web_up())
+        st.poll(HOLD)
+    finally:
+        st.finish()
+
+
+steps = A.steps.split(",")
+for s in steps:
+    if s == "rytm-a4":
+        two_orders("rytm", "a4")
+    elif s == "a4-rytm":
+        two_orders("a4", "rytm")
+    elif s == "again":
+        again()
+    else:
+        sys.exit("unknown step " + s)
+print("\n".join("FAIL " + f for f in fails))
+print("TWO-BOX GATE (emulator):", "PASS" if not fails else f"FAIL ({len(fails)})")
+sys.exit(1 if fails else 0)

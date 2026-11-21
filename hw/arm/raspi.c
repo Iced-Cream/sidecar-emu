@@ -277,7 +277,11 @@ void raspi_base_machine_init(MachineState *machine,
     /* Create and plug in the SD cards */
     di = drive_get(IF_SD, 0, 0);
     blk = di ? blk_by_legacy_dinfo(di) : NULL;
-    bus = qdev_get_child_bus(DEVICE(soc), "sd-bus");
+    /* the card goes on EMMC2 where the SoC has it (raspi4b), else on the legacy sd-bus */
+    bus = qdev_get_child_bus(DEVICE(soc), "emmc2-bus");
+    if (bus == NULL) {
+        bus = qdev_get_child_bus(DEVICE(soc), "sd-bus");
+    }
     if (bus == NULL) {
         error_report("No SD bus found in SOC object");
         exit(1);

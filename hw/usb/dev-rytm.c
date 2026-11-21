@@ -24,6 +24,14 @@
  * documented layout (interfaces, alternate settings, endpoints, the MIDI
  * jacks); nothing here comes from Elektron's firmware.
  *
+ * usb-a4 is the same device as an Analog Four MKII in OVERBRIDGE mode
+ * (1935:0b47): 8 channels to the host (MAIN L R, tracks 1..4, INPUT L R; 256 B
+ * blocks), 6 from it (MAIN L R, tracks 1..4; 200 B blocks), at alternate 3 of
+ * the same interfaces and endpoints. Its link is the same oblink.rs protocol
+ * from analog-emu's A4: the link's 12-channel frames carry the A4's channels
+ * first, the rest zero. Two such devices (a Rytm and an A4) on one host are
+ * the Sidecar's "two Links" gate.
+ *
  * Local experiment for the Sidecar project's emulator gates; not intended
  * for upstream QEMU.
  *
@@ -47,11 +55,13 @@
 #include "qom/object.h"
 
 #define TYPE_USB_RYTM "usb-rytm"
+#define TYPE_USB_A4   "usb-a4"
 OBJECT_DECLARE_SIMPLE_TYPE(USBRytmState, USB_RYTM)
 
-#define OB_CHANNELS         12
+#define OB_CHANNELS         12              /* a link frame; the most a block has */
 #define OB_FRAMES           7               /* frames per block */
-#define OB_BLOCK            368             /* 32-byte header + 7 x 12 x 4 */
+#define OB_BLOCK            368             /* the biggest block: 32-byte header + 7 x 12 x 4 */
+#define OB_BLOCK_OF(ch)     (32 + OB_FRAMES * (ch) * 4)
 #define OB_HDR              32
 #define OB_MAGIC_IN         0x0700          /* Rytm -> host */
 #define OB_ALT              3
@@ -73,9 +83,20 @@ OBJECT_DECLARE_SIMPLE_TYPE(USBRytmState, USB_RYTM)
 
 #define BLOCK_NS            (NANOSECONDS_PER_SECOND * OB_FRAMES / 48000)
 
+/* what differs between the boxes (the class's data) */
+typedef struct BoxModel {
+    const char *product_desc;
+    const USBDesc *desc;
+    unsigned in_ch, out_ch;                 /* box -> host, host -> box */
+    const char *name, *os_version;          /* the properties' defaults */
+    uint64_t uid;
+} BoxModel;
+
 struct USBRytmState {
     USBDevice dev;
     CharFrontend cs;
+    const BoxModel *m;
+    unsigned in_blk, out_blk;               /* bytes a block, from m */
 
     /* properties */
     uint64_t uid;
@@ -263,6 +284,104 @@ static const USBDesc desc_rytm = {
     .str  = desc_strings,
 };
 
+/* The Analog Four MKII: the same layout; alternate 3's packets are its blocks
+ * (8 channels in, 6 out). Alternates 1 and 2 as the Rytm's (no host here uses
+ * them). */
+static const USBDescStrings desc_strings_a4 = {
+    [STR_MANUFACTURER] = "Elektron Music Machines",
+    [STR_PRODUCT]      = "Analog Four MKII",
+    [STR_SERIALNUMBER] = "000000000002",
+};
+
+static USBDescEndpoint a4_in_eps[3] = {
+    { .bEndpointAddress = USB_DIR_IN | OB_EP_IN, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 32, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_IN | OB_EP_IN, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 88, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_IN | OB_EP_IN, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = OB_BLOCK_OF(8), .bInterval = 1 },
+};
+
+static USBDescEndpoint a4_out_eps[3] = {
+    { .bEndpointAddress = USB_DIR_OUT | OB_EP_OUT, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 32, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_OUT | OB_EP_OUT, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 88, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_OUT | OB_EP_OUT, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = OB_BLOCK_OF(6), .bInterval = 1 },
+};
+
+static const USBDescIface a4_ob_ifaces[] = {
+    VENDOR_IF(0, 0, 0, NULL),
+    VENDOR_IF(1, 0, 0, NULL),
+    VENDOR_IF(1, 1, 1, &a4_in_eps[0]),
+    VENDOR_IF(1, 2, 1, &a4_in_eps[1]),
+    VENDOR_IF(1, 3, 1, &a4_in_eps[2]),
+    VENDOR_IF(2, 0, 0, NULL),
+    VENDOR_IF(2, 1, 1, &a4_out_eps[0]),
+    VENDOR_IF(2, 2, 1, &a4_out_eps[1]),
+    VENDOR_IF(2, 3, 1, &a4_out_eps[2]),
+    VENDOR_IF(3, 0, 2, pipe_eps),
+};
+
+static const USBDescIfaceAssoc a4_groups[] = {
+    {
+        .bFirstInterface = 0, .bInterfaceCount = 4,
+        .bFunctionClass = USB_CLASS_VENDOR_SPEC,
+        .nif = ARRAY_SIZE(a4_ob_ifaces), .ifs = a4_ob_ifaces,
+    }, {
+        .bFirstInterface = 4, .bInterfaceCount = 2,
+        .bFunctionClass = USB_CLASS_AUDIO, .bFunctionSubClass = 0x01,
+        .nif = ARRAY_SIZE(midi_ifaces), .ifs = midi_ifaces,
+    },
+};
+
+static const USBDescDevice desc_device_a4 = {
+    .bcdUSB             = 0x0200,
+    .bDeviceClass       = 0xef,
+    .bDeviceSubClass    = 0x02,
+    .bDeviceProtocol    = 0x01,
+    .bMaxPacketSize0    = 64,
+    .bNumConfigurations = 1,
+    .confs = (USBDescConfig[]) {
+        {
+            .bNumInterfaces      = 6,
+            .bConfigurationValue = 1,
+            .bmAttributes        = USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER,
+            .bMaxPower           = 0,
+            .nif_groups          = ARRAY_SIZE(a4_groups),
+            .if_groups           = a4_groups,
+        },
+    },
+};
+
+static const USBDesc desc_a4 = {
+    .id = {
+        .idVendor          = 0x1935,
+        .idProduct         = 0x0b47,
+        .bcdDevice         = 0x0100,
+        .iManufacturer     = STR_MANUFACTURER,
+        .iProduct          = STR_PRODUCT,
+        .iSerialNumber     = STR_SERIALNUMBER,
+    },
+    .high = &desc_device_a4,
+    .str  = desc_strings_a4,
+};
+
+static const BoxModel model_rytm = {
+    .product_desc = "Analog Rytm MKII stand-in", .desc = &desc_rytm,
+    .in_ch = 12, .out_ch = 12,
+    .name = "Analog Rytm MKII (QEMU)", .os_version = "1.74",
+    .uid = 0x00000000c0ffee01ULL,
+};
+
+static const BoxModel model_a4 = {
+    .product_desc = "Analog Four MKII stand-in", .desc = &desc_a4,
+    .in_ch = 8, .out_ch = 6,
+    .name = "Analog Four MKII (QEMU)", .os_version = "1.56",
+    .uid = 0x00000000c0ffee02ULL,
+};
+
 /* ---------------------------------------------------------------------------
  * The link to rytm-emu
  */
@@ -373,8 +492,8 @@ static void rytm_make_block(USBRytmState *s)
         } else {
             s->starved++;
         }
-        for (c = 0; c < OB_CHANNELS; c++) {
-            stl_be_p(blk + OB_HDR + (f * OB_CHANNELS + c) * 4, fr ? fr[c] : 0);
+        for (c = 0; c < s->m->in_ch; c++) {    /* the box's channels: the link frame's first */
+            stl_be_p(blk + OB_HDR + (f * s->m->in_ch + c) * 4, fr ? fr[c] : 0);
         }
     }
     s->in_count++;
@@ -420,8 +539,8 @@ static void rytm_take_out_block(USBRytmState *s, const uint8_t *blk)
             continue;
         }
         fr = s->oframes[(s->o_head + s->o_count) % OFRAMES_MAX];
-        for (c = 0; c < OB_CHANNELS; c++) {
-            fr[c] = ldl_be_p(blk + OB_HDR + (f * OB_CHANNELS + c) * 4);
+        for (c = 0; c < OB_CHANNELS; c++) {    /* the box's channels first, the rest of the link frame 0 */
+            fr[c] = c < s->m->out_ch ? ldl_be_p(blk + OB_HDR + (f * s->m->out_ch + c) * 4) : 0;
         }
         s->o_count++;
     }
@@ -715,11 +834,11 @@ static void rytm_handle_data(USBDevice *dev, USBPacket *p)
     switch (p->pid) {
     case USB_TOKEN_IN:
         if (p->ep->nr == OB_EP_IN && p->ep == s->ep_in) {
-            if (!s->in_count || p->iov.size < OB_BLOCK) {
+            if (!s->in_count || p->iov.size < s->in_blk) {
                 p->status = USB_RET_NAK;
                 return;
             }
-            usb_packet_copy(p, s->in_blocks[s->in_head], OB_BLOCK);
+            usb_packet_copy(p, s->in_blocks[s->in_head], s->in_blk);
             s->in_head = (s->in_head + 1) % IN_BLOCKS_MAX;
             s->in_count--;
             s->blocks_in++;
@@ -744,8 +863,8 @@ static void rytm_handle_data(USBDevice *dev, USBPacket *p)
     case USB_TOKEN_OUT:
         if (p->ep->nr == OB_EP_OUT) {
             uint8_t blk[OB_BLOCK];
-            if (p->iov.size >= OB_BLOCK) {
-                usb_packet_copy(p, blk, OB_BLOCK);
+            if (p->iov.size >= s->out_blk) {
+                usb_packet_copy(p, blk, s->out_blk);
                 rytm_take_out_block(s, blk);
             } else {
                 usb_packet_skip(p, p->iov.size);
@@ -827,17 +946,20 @@ static void rytm_instance_init(Object *obj)
 {
     USBRytmState *s = USB_RYTM(obj);
 
-    s->name = g_strdup("Analog Rytm MKII (QEMU)");
-    s->os_version = g_strdup("1.74");
+    s->m = strcmp(object_get_typename(obj), TYPE_USB_A4) == 0 ? &model_a4 : &model_rytm;
+    s->in_blk = OB_BLOCK_OF(s->m->in_ch);
+    s->out_blk = OB_BLOCK_OF(s->m->out_ch);
+    s->uid = s->m->uid;
+    s->name = g_strdup(s->m->name);
+    s->os_version = g_strdup(s->m->os_version);
 }
 
 static void rytm_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
-
-    uc->product_desc   = "Analog Rytm MKII stand-in";
-    uc->usb_desc       = &desc_rytm;
+    uc->product_desc   = model_rytm.product_desc;
+    uc->usb_desc       = model_rytm.desc;
     uc->realize        = rytm_realize;
     uc->unrealize      = rytm_unrealize;
     uc->handle_attach  = usb_desc_attach;
@@ -858,9 +980,25 @@ static const TypeInfo rytm_info = {
     .class_init    = rytm_class_init,
 };
 
+/* the A4: the Rytm's class (its properties and handlers) with its own descriptors */
+static void a4_class_init(ObjectClass *klass, const void *data)
+{
+    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
+
+    uc->product_desc = model_a4.product_desc;
+    uc->usb_desc     = model_a4.desc;
+}
+
+static const TypeInfo a4_info = {
+    .name          = TYPE_USB_A4,
+    .parent        = TYPE_USB_RYTM,
+    .class_init    = a4_class_init,
+};
+
 static void rytm_register_types(void)
 {
     type_register_static(&rytm_info);
+    type_register_static(&a4_info);
 }
 
 type_init(rytm_register_types)

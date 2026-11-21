@@ -48,7 +48,7 @@ struct USBHubState {
     uint32_t num_ports;
     bool port_power;
     bool fail_intr;     /* test: every status-change poll ends in a transaction error */
-    bool high_speed;    /* a USB 2.0 hub: high-speed devices downstream (the Pi 4's VL805 hub) */
+    bool high_speed;    /* a USB 2.0 hub (the Pi 4 board's VL805 hub, 2109:3431): high-speed devices on its ports */
     QEMUTimer *port_timer;
     USBHubPort ports[MAX_PORTS];
 };
@@ -155,12 +155,15 @@ static const USBDesc desc_hub = {
     .str  = desc_strings,
 };
 
-/*
- * high-speed=on: a USB 2.0 hub (single TT), so that high-speed devices can sit
- * behind it as they do behind the Pi 4's on-board hub (usb-rytm and usb-teensy
- * at once; the VL805 has one USB 2 root port). Not a model of the TT: the
- * downstream devices keep their own speed.
- */
+/* high-speed=on: a USB 2.0 single-TT hub with the ids of the Raspberry Pi 4's
+ * board hub behind the VL805's USB 2 port (VIA Labs 2109:3431), so two
+ * high-speed boxes can hang off the one USB 2 root port as on the board. */
+static const USBDescStrings desc_strings_hs = {
+    [STR_MANUFACTURER] = "",
+    [STR_PRODUCT]      = "USB2.0 Hub",
+    [STR_SERIALNUMBER] = "",
+};
+
 static const USBDescIface desc_iface_hub_hs = {
     .bInterfaceNumber              = 0,
     .bNumEndpoints                 = 1,
@@ -170,7 +173,7 @@ static const USBDescIface desc_iface_hub_hs = {
             .bEndpointAddress      = USB_DIR_IN | 0x01,
             .bmAttributes          = USB_ENDPOINT_XFER_INT,
             .wMaxPacketSize        = 1 + DIV_ROUND_UP(MAX_PORTS, 8),
-            .bInterval             = 12,
+            .bInterval             = 12,    /* 2^11 microframes, 256 ms */
         },
     }
 };
@@ -178,7 +181,7 @@ static const USBDescIface desc_iface_hub_hs = {
 static const USBDescDevice desc_device_hub_hs = {
     .bcdUSB                        = 0x0200,
     .bDeviceClass                  = USB_CLASS_HUB,
-    .bDeviceProtocol               = 1,             /* single TT */
+    .bDeviceProtocol               = 1,     /* single TT */
     .bMaxPacketSize0               = 64,
     .bNumConfigurations            = 1,
     .confs = (USBDescConfig[]) {
@@ -195,15 +198,13 @@ static const USBDescDevice desc_device_hub_hs = {
 
 static const USBDesc desc_hub_hs = {
     .id = {
-        .idVendor          = 0x0409,
-        .idProduct         = 0x55aa,
-        .bcdDevice         = 0x0101,
-        .iManufacturer     = STR_MANUFACTURER,
+        .idVendor          = 0x2109,
+        .idProduct         = 0x3431,
+        .bcdDevice         = 0x0421,
         .iProduct          = STR_PRODUCT,
-        .iSerialNumber     = STR_SERIALNUMBER,
     },
     .high = &desc_device_hub_hs,
-    .str  = desc_strings,
+    .str  = desc_strings_hs,
 };
 
 static const uint8_t qemu_hub_hub_descriptor[] =
@@ -260,9 +261,9 @@ static bool usb_hub_port_update(USBHubPort *port)
             usb_hub_port_clear(port, PORT_STAT_LOW_SPEED);
         }
         if (port->port.dev->speed == USB_SPEED_HIGH) {
-            usb_hub_port_set(port, PORT_STAT_HIGH_SPEED);
+            port->wPortStatus |= PORT_STAT_HIGH_SPEED;  /* (not a change bit) */
         } else {
-            usb_hub_port_clear(port, PORT_STAT_HIGH_SPEED);
+            port->wPortStatus &= ~PORT_STAT_HIGH_SPEED;
         }
     }
     return notify;
@@ -669,8 +670,9 @@ static void usb_hub_realize(USBDevice *dev, Error **errp)
 
     if (s->high_speed) {
         dev->usb_desc = &desc_hub_hs;
+    } else {
+        usb_desc_create_serial(dev);
     }
-    usb_desc_create_serial(dev);
     usb_desc_init(dev);
     s->port_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                  usb_hub_port_update_timer, s);
@@ -744,11 +746,11 @@ static void usb_hub_class_initfn(ObjectClass *klass, const void *data)
     USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
 
     uc->realize        = usb_hub_realize;
-    uc->handle_attach  = usb_desc_attach;   /* high-speed=on: the .high set */
     uc->product_desc   = "QEMU USB Hub";
     uc->usb_desc       = &desc_hub;
     uc->find_device    = usb_hub_find_device;
     uc->handle_reset   = usb_hub_handle_reset;
+    uc->handle_attach  = usb_desc_attach;   /* the speed the port and the descriptors share (high-speed=on) */
     uc->handle_control = usb_hub_handle_control;
     uc->handle_data    = usb_hub_handle_data;
     uc->unrealize      = usb_hub_unrealize;
