@@ -4,12 +4,15 @@
 #   2. usb-rytm on that port, linked to tools/stublink.py, plus the USB-C gadget:
 #      /status, usb-rytm enumerates, the gadget's endpoints come up
 # usage: sidecar/smoke-test.sh <kernel8-rpi4.img>
+# HTTP_PORT, STUB_PORT, GADGET_PORT default to 18080, 7301, 7400 when free, else to free ports (runs can share a host)
 set -uo pipefail
 K=${1:?usage: smoke-test.sh <kernel8-rpi4.img>}
 S=$(cd "$(dirname "$0")" && pwd)
 O=$(mktemp -d)
-export HTTP_PORT=${HTTP_PORT:-18080}
-STUB_PORT=${STUB_PORT:-7301}
+read -r P_HTTP P_STUB P_GADGET < <(python3 -I "$S/tools/freeport.py" 18080 7301 7400)
+export HTTP_PORT=${HTTP_PORT:-$P_HTTP}
+STUB_PORT=${STUB_PORT:-$P_STUB}
+GADGET_PORT=${GADGET_PORT:-$P_GADGET}
 fail=0
 wait_status() {
   local st=000

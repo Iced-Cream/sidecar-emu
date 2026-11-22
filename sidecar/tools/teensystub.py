@@ -2,14 +2,14 @@
 """The computer on the far side of usb-teensy (hw/usb/dev-teensy.c), for testing the Pi engine's Teensy relay
 without a Teensy.
 
-usb-teensy's chardev connects here (run-sidecar.sh TEENSY=127.0.0.1:7302). When the relay shows a box ('V' 1) this
+usb-teensy's chardev connects here (run-sidecar.sh TEENSY=127.0.0.1:7302, or TEENSY=unix:PATH with --port unix:PATH). When the relay shows a box ('V' 1) this
 script does what a computer does with it: bus reset, the device, configuration and string descriptors (answered by the
 stub from what the Pi uploaded), SET_CONFIGURATION, then vendor requests that the relay forwards to the Pi and the Pi
 forwards to the box (Overbridge's unit ID, name, OS version, protocol versions: the Rytm's requests 0, 1, 2, 4), and
 optionally SET_INTERFACE alt 3 on interfaces 1 and 2 and the computer's audio OUT blocks to 0x03. It prints each answer
 and a line a second with what it got.
 
-  python3 sidecar/tools/teensystub.py [--port 7302] [--audio] [--flash-build NAME] [--button-at S] [--replug-at S]
+  python3 sidecar/tools/teensystub.py [--port 7302|unix:PATH] [--audio] [--flash-build NAME] [--button-at S] [--replug-at S]
                                       [--exit-after S] [--exit-after-shown S] [--json FILE]
 
 --flash-build sets the build the next flash comes back with ('B'); --button-at presses the program button S seconds
@@ -20,6 +20,7 @@ Frames both ways: [kind u8][length u16 LE][payload] (dev-teensy.c's header comme
 """
 import argparse
 import json
+import os
 import socket
 import struct
 import sys
@@ -209,7 +210,7 @@ class Computer:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", type=int, default=7302)
+    ap.add_argument("--port", default="7302", help="TCP port on 127.0.0.1, or unix:PATH")
     ap.add_argument("--audio", action="store_true", help="SET_INTERFACE alt 3 and send audio OUT blocks")
     ap.add_argument("--flash-build", default="")
     ap.add_argument("--button-at", type=float)
@@ -218,9 +219,15 @@ def main():
     ap.add_argument("--exit-after-shown", type=float, default=0)
     ap.add_argument("--json")
     a = ap.parse_args()
-    srv = socket.socket()
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", a.port))
+    if a.port.startswith("unix:"):
+        if os.path.exists(a.port[5:]):
+            os.unlink(a.port[5:])
+        srv = socket.socket(socket.AF_UNIX)
+        srv.bind(a.port[5:])
+    else:
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", int(a.port)))
     srv.listen(1)
     print("waiting for usb-teensy on", a.port, flush=True)
     c, addr = srv.accept()

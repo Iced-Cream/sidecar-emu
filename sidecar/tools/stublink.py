@@ -1,14 +1,21 @@
 # A stand-in for rytm-emu's Overbridge link server (oblink.rs protocol), for testing usb-rytm without firmware.
-import socket, struct, sys, time, threading, math
-# usage: stublink.py [port] [--hello ID]: ID is the box id the stub says hello with 6 s after the host connects
+import os, socket, struct, sys, time, threading, math
+# usage: stublink.py [port|unix:PATH] [--hello ID]: listens on 127.0.0.1:port (default 7301), or on a unix socket at PATH
+# (run-sidecar.sh LINK=unix:PATH; a path per run lets runs share a host). ID is the box id the stub says hello with 6 s after the host connects
 # (sidecar-firmware core/device: 3 = Analog Four MKII, 2 = Digitakt; default 7, an id with no profile); 0 = no hello,
 # as a stock Rytm.
 args = [a for a in sys.argv[1:]]
 hello_id = 7
 if '--hello' in args:
     i = args.index('--hello'); hello_id = int(args[i + 1]); del args[i:i + 2]
-port = int(args[0]) if args else 7301
-srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(('127.0.0.1', port)); srv.listen(1)
+where = args[0] if args else '7301'
+if where.startswith('unix:'):
+    path = where[5:]
+    if os.path.exists(path): os.unlink(path)    # a stale socket from an earlier stub on this path
+    srv = socket.socket(socket.AF_UNIX); srv.bind(path)
+else:
+    srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(('127.0.0.1', int(where)))
+srv.listen(1)
 st = dict(A=0, M=0, H=None, Mbytes=b'')
 def reader(c):
     buf = b''

@@ -112,6 +112,13 @@ after boot.
 None of these need firmware; `sidecar/tools/stublink.py` stands in for
 analog-emu's link.
 
+Several test runs can share a host. The gate scripts link their stubs over
+unix sockets in a private temporary folder (`LINK`, `A4_LINK` and `TEENSY`
+take `unix:PATH`), and every port they forward is the usual one when free,
+otherwise a free one (`sidecar/tools/freeport.py`); an explicit `HTTP_PORT`
+is used as given. Give each run its own outdir and, on a many-core host,
+its own `CPUS` (e.g. `0-1` and `2-3`).
+
 - `sidecar/smoke-test.sh <kernel>`: two boots. A USB keyboard on the VL805
   enumerates and `/status` answers; then usb-rytm enumerates against the stub
   link and the gadget's endpoints come up.
