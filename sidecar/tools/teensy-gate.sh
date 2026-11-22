@@ -9,7 +9,11 @@
 # usage: sidecar/tools/teensy-gate.sh <kernel8-rpi4.img> <outdir> <sidecar-firmware checkout> ["engine words"]
 #   (teensy_flash.py comes from the checkout's tools/). The cmdline gets paircode=0 (emulator only) and
 #   mirrorfirst=relay (the Rytm goes to the relay; on a unit the A4 would take USB-C).
-# Environment: QEMU, CPUS, HTTP_PORT (default 18117) as run-sidecar.sh. Kills only the processes it started.
+# Environment: QEMU, CPUS, HTTP_PORT (default: 18117 if free, else a free port, picked per boot), GADGET_PORT (default:
+# 7400 if free, else a free port) as run-sidecar.sh. Kills only the processes it started.
+# Several gates can run at once on one host, each with its own outdir: the stub links are unix sockets in a private
+# temporary folder and the ports are picked per boot as above (each boot's are in its qemu.out). Give parallel runs
+# different CPUS.
 set -u
 K=${1:?usage: teensy-gate.sh <kernel> <outdir> <sidecar-firmware> [words]}
 O=${2:?outdir}
@@ -17,7 +21,8 @@ FW=${3:?sidecar-firmware checkout}
 WORDS=${4:-"sdport=0 usbmidi=os:on usbreboot=1 usb=mirror mirror=a4 mirrorhold=60 relaydelay=10"}
 WORDS="$WORDS paircode=0 mirrorfirst=relay"
 T=$(cd "$(dirname "$0")" && pwd)
-export HTTP_PORT=${HTTP_PORT:-18117}
+HTTP_FIXED=${HTTP_PORT:-} GADGET_FIXED=${GADGET_PORT:-}
+SOCKS=$(mktemp -d "${TMPDIR:-/tmp}/teensy-gate.XXXXXX")
 mkdir -p "$O"
 python3 - "$O/test.hex" <<'PY'
 import sys, random
@@ -33,15 +38,24 @@ PY
 
 pids=()
 stop_all() { for p in "${pids[@]}"; do pkill -TERM -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; done; wait 2>/dev/null; pids=(); }
-trap stop_all EXIT
+trap 'stop_all; rm -rf "$SOCKS"' EXIT
 web_up() { for _ in $(seq 1 60); do curl -s -m 3 "http://127.0.0.1:$HTTP_PORT/status" >/dev/null 2>&1 && return 0; sleep 3; done; return 1; }
 boot() {  # boot <dir> <seconds> <teensy opts> [teensystub args...]
   local d=$1 s=$2 opts=$3; shift 3; mkdir -p "$d"
-  python3 "$T/stublink.py" 7301 > "$d/stublink.log" 2>&1 & pids+=($!)
-  python3 "$T/teensystub.py" --port 7302 --json "$d/teensy.json" "$@" > "$d/teensystub.log" 2>&1 & pids+=($!)
+  python3 "$T/stublink.py" "unix:$SOCKS/rytm.link" > "$d/stublink.log" 2>&1 & pids+=($!)
+  python3 "$T/teensystub.py" --port "unix:$SOCKS/teensy.link" --json "$d/teensy.json" "$@" > "$d/teensystub.log" 2>&1 & pids+=($!)
   sleep 0.5
-  UART=$d/uart.log GADGET_PORT=7400 WATCHDOG=off TEENSY=127.0.0.1:7302 TEENSY_OPTS=$opts \
-    timeout "$s" "$T/../run-sidecar.sh" "$K" "$WORDS" > "$d/qemu.out" 2>&1 & pids+=($!)
+  # pick the ports and start QEMU under the host-wide port lock, held until QEMU listens (freeport.py)
+  exec {lk}>>"$(python3 -c 'import tempfile, os; print(os.path.join(tempfile.gettempdir(), "sidecar-emu-ports.lock"))')"
+  flock "$lk"
+  read -r HTTP_PORT GADGET_PORT < <(python3 "$T/freeport.py" "${HTTP_FIXED:-18117}" "${GADGET_FIXED:-7400}")
+  [ -n "$HTTP_FIXED" ] && HTTP_PORT=$HTTP_FIXED; [ -n "$GADGET_FIXED" ] && GADGET_PORT=$GADGET_FIXED
+  echo "web on 127.0.0.1:$HTTP_PORT, gadget on 127.0.0.1:$GADGET_PORT" > "$d/qemu.out"
+  UART=$d/uart.log HTTP_PORT=$HTTP_PORT GADGET_PORT=$GADGET_PORT WATCHDOG=off TEENSY=unix:$SOCKS/teensy.link \
+    TEENSY_OPTS=$opts LINK=unix:$SOCKS/rytm.link \
+    timeout "$s" "$T/../run-sidecar.sh" "$K" "$WORDS" >> "$d/qemu.out" 2>&1 {lk}>&- & pids+=($!)   # QEMU must not keep the lock
+  python3 "$T/freeport.py" --wait-bound "$HTTP_PORT" 10
+  exec {lk}>&-
 }
 # The engine reaches usb=mirror at very different uptimes (about 35 s in the cloud, 2.5 min on a busy PC), so the
 # steps wait for the relay's "box up" line rather than a fixed delay.

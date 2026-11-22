@@ -34,6 +34,9 @@
 #                a second, and on a many-core host (WSL) that is far slower
 #                than on 2 CPUs. Empty = no pinning (default)
 #   EXTRA        more QEMU arguments
+# LINK, A4_LINK and TEENSY also take unix:PATH, a unix socket the stub listens on
+# (stublink.py unix:PATH, teensystub.py --port unix:PATH): a path per run needs no
+# free port, so several runs can share a host (tools/twobox-gate.py, tools/teensy-gate.sh)
 set -euo pipefail
 K=${1:?usage: run-sidecar.sh <kernel8-rpi4.img> [\"engine words\"]}
 WORDS=${2:-}
@@ -59,6 +62,8 @@ fi
 if [ -n "${QMP:-}" ]; then
   args+=(-qmp "unix:$QMP,server=on,wait=off")
 fi
+# chardev socket address for host:port or unix:PATH
+addr() { case $1 in unix:*) echo "path=${1#unix:}";; *) echo "host=${1%:*},port=${1##*:}";; esac; }
 TEENSY=${TEENSY:-}
 A4_LINK=${A4_LINK:-}
 rport=() tport=() aport=()
@@ -67,17 +72,17 @@ if [ -n "$TEENSY" ] || [ -n "$A4_LINK" ]; then
   rport=(,bus=usb-bus.1,port=1.1) tport=(,bus=usb-bus.1,port=1.2) aport=(,bus=usb-bus.1,port=1.3)
 fi
 if [ -n "$A4_LINK" ]; then
-  args+=(-chardev "socket,id=al,host=${A4_LINK%:*},port=${A4_LINK##*:},reconnect-ms=1000"
+  args+=(-chardev "socket,id=al,$(addr "$A4_LINK"),reconnect-ms=1000"
          -device "usb-a4,id=a4,chardev=al${aport[*]}")
 fi
 if [ -n "$LINK" ]; then
-  args+=(-chardev "socket,id=rl,host=${LINK%:*},port=${LINK##*:},reconnect-ms=1000"
+  args+=(-chardev "socket,id=rl,$(addr "$LINK"),reconnect-ms=1000"
          -device "usb-rytm,id=rytm,chardev=rl${rport[*]}")
 fi
 if [ "$TEENSY" = none ]; then
   args+=(-device "usb-teensy${tport[*]}${TEENSY_OPTS:+,$TEENSY_OPTS}")
 elif [ -n "$TEENSY" ]; then
-  args+=(-chardev "socket,id=tl,host=${TEENSY%:*},port=${TEENSY##*:},reconnect-ms=1000"
+  args+=(-chardev "socket,id=tl,$(addr "$TEENSY"),reconnect-ms=1000"
          -device "usb-teensy,chardev=tl${tport[*]}${TEENSY_OPTS:+,$TEENSY_OPTS}")
 fi
 # shellcheck disable=SC2086

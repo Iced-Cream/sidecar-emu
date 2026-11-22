@@ -1,12 +1,13 @@
 #!/bin/bash
 # usage: hubloop.sh <kernel> <outdir> <cycles>
 K=$1; O=$2; N=${3:-10}; S=$(cd "$(dirname "$0")" && pwd); Q=${QEMU:-$(cd "$S/../.." && pwd)/build/qemu-system-aarch64}
+HTTP_PORT=${HTTP_PORT:-$(python3 -I "$S/freeport.py" 18080)}   # 18080 when free (runs can share a host)
 mkdir -p "$O"; cd "$O"; rm -f mon.sock uart.log
 timeout 900 $Q -M raspi4b -kernel "$K" -append "ip=10.0.2.15 netmask=255.255.255.0" -serial file:uart.log -display none \
-  -qmp unix:mon.sock,server,nowait -nic user,model=bcm2838-genet,hostfwd=tcp:127.0.0.1:18080-:80 > qemu.out 2>&1 &
+  -qmp unix:mon.sock,server,nowait -nic user,model=bcm2838-genet,hostfwd=tcp:127.0.0.1:$HTTP_PORT-:80 > qemu.out 2>&1 &
 QP=$!
 w() { python3 -I -c "import time; time.sleep($1)"; }
-up() { curl -s -m 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:18080/status; }
+up() { curl -s -m 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:$HTTP_PORT/status; }
 for i in $(seq 30); do [ "$(up)" = 200 ] && break; w 1; done
 echo "boot status $(up)"
 hmp() { python3 -I $S/qmp.py mon.sock "$@" >/dev/null; }

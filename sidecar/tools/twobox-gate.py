@@ -9,7 +9,9 @@ link starts and detaches when it stops, so the script sets the attach order by s
   a4-rytm   A4 at boot, Rytm once the web answers (+ATTACH_GAP s), Rytm unplugged and plugged back
   again     a boot on rytm-a4's card with both boxes, so what the first boot saved is read back
 
-One QEMU at a time. After each step each box's `attached` property is read over QMP (the emulator's own view of what is plugged),
+Several gates can run at once on one host, each with its own OUTDIR: the box links are unix sockets in a private
+temporary folder, and the web port is HTTP_PORT if set, otherwise 18118 when free, otherwise a free port (picked per
+step, logged in run.log and summary.json). Give parallel runs different CPUS. After each step each box's `attached` property is read over QMP (the emulator's own view of what is plugged),
 /status is logged whenever it changes, and after QEMU stops the card's /, /.rytm, /.a4 and /.sidecar are listed.
 
 The script judges the emulator only (PASS/FAIL lines): the boxes QEMU shows match each step, /status answers, the card
@@ -18,26 +20,34 @@ is recorded in each step's summary.json and status.log for the kernel's own gate
 the card's /.rytm and /.a4 part of the PASS.
 
   sidecar/tools/twobox-gate.py KERNEL OUTDIR [--words "..."] [--steps rytm-a4,a4-rytm,again] [--expect-folders]
-Environment: QEMU, CPUS, HTTP_PORT (default 18118) as run-sidecar.sh; ATTACH_GAP (default 20), HOLD (default 30:
+Environment: QEMU, CPUS, HTTP_PORT (default: 18118 if free, else a free port) as run-sidecar.sh; ATTACH_GAP (default 20), HOLD (default 30:
 seconds between the events after the second attach), WEB_WAIT (default 300). Kills only the processes it started.
 """
-import argparse, json, os, re, signal, socket, subprocess, sys, time, urllib.request
+import argparse, fcntl, json, os, re, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
 
 T = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, T)
+from freeport import PortLock, pick, wait_bound
 P = argparse.ArgumentParser()
 P.add_argument("kernel"); P.add_argument("outdir")
 P.add_argument("--words", default="sdport=0 display=0 bench=0 blocklimit=1000")
 P.add_argument("--steps", default="rytm-a4,a4-rytm,again")
 P.add_argument("--expect-folders", action="store_true")
 A = P.parse_args()
-HTTP = int(os.environ.get("HTTP_PORT", "18118"))
+HTTP_FIXED = os.environ.get("HTTP_PORT")
 GAP = float(os.environ.get("ATTACH_GAP", "20"))
 HOLD = float(os.environ.get("HOLD", "30"))
 WEB_WAIT = float(os.environ.get("WEB_WAIT", "300"))
-LINKS = {"rytm": 7301, "a4": 7311}
 HELLO = {"rytm": 0, "a4": 3}      # a stock Rytm never says hello; the A4 companion says hello with id 3
 DEV = ("rytm", "a4")            # the QEMU device ids run-sidecar.sh gives them
 os.makedirs(A.outdir, exist_ok=True)
+_lock = open(os.path.join(A.outdir, ".twobox-gate.lock"), "w")
+try:
+    fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(f"another twobox-gate.py is using {A.outdir}; give each run its own OUTDIR")
+SOCKS = tempfile.mkdtemp(prefix="twobox-")   # short paths (a unix socket path has ~107 bytes), one folder per run
+LINKS = {b: os.path.join(SOCKS, b + ".link") for b in ("rytm", "a4")}
 fails = []
 
 
@@ -47,8 +57,10 @@ class Step:
         self.d = os.path.join(A.outdir, name); os.makedirs(self.d, exist_ok=True)
         self.t0 = time.time(); self.log_f = open(os.path.join(self.d, "run.log"), "w")
         self.stubs, self.qemu, self.qmp = {}, None, None
+        self.http = int(HTTP_FIXED) if HTTP_FIXED else None   # picked at boot, under the host-wide port lock
+        self.qmp_path = os.path.join(SOCKS, name + ".qmp")
         self.status_f = open(os.path.join(self.d, "status.log"), "w"); self.last = None
-        self.summary = {"step": self.name, "events": []}
+        self.summary = {"step": self.name, "events": [], "http_port": self.http}
 
     def log(self, *a):
         s = f"{time.time() - self.t0:7.1f} " + " ".join(str(x) for x in a)
@@ -63,7 +75,7 @@ class Step:
     def plug(self, box):
         n = sum(1 for e in self.summary["events"] if e[1] == "plug " + box) + 1
         f = open(os.path.join(self.d, f"stublink-{box}{n}.log"), "w")
-        self.stubs[box] = subprocess.Popen([sys.executable, os.path.join(T, "stublink.py"), str(LINKS[box]),
+        self.stubs[box] = subprocess.Popen([sys.executable, os.path.join(T, "stublink.py"), "unix:" + LINKS[box],
                                             "--hello", str(HELLO[box])],
                                            stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
         self.event("plug " + box)
@@ -78,19 +90,27 @@ class Step:
 
     # QEMU
     def boot(self):
-        env = dict(os.environ, LINK=f"127.0.0.1:{LINKS['rytm']}", A4_LINK=f"127.0.0.1:{LINKS['a4']}",
-                   CARD=self.card, QMP=os.path.join(self.d, "qmp.sock"), UART=os.path.join(self.d, "uart.log"),
-                   GADGET_PORT="", WATCHDOG="off", HTTP_PORT=str(HTTP))
+        if os.path.exists(self.qmp_path):
+            os.unlink(self.qmp_path)
+        env = dict(os.environ, LINK="unix:" + LINKS["rytm"], A4_LINK="unix:" + LINKS["a4"],
+                   CARD=self.card, QMP=self.qmp_path, UART=os.path.join(self.d, "uart.log"),
+                   GADGET_PORT="", WATCHDOG="off")
         words = f"{A.words} paircode=0".strip()
-        self.qemu = subprocess.Popen([os.path.join(T, "..", "run-sidecar.sh"), A.kernel, words], env=env,
-                                     stdout=open(os.path.join(self.d, "qemu.out"), "w"), stderr=subprocess.STDOUT,
-                                     start_new_session=True)
-        self.event("qemu started")
+        with PortLock():   # pick and bind the web port before another run can pick it
+            if not HTTP_FIXED:
+                self.http = pick(18118)[0]
+            self.summary["http_port"] = self.http
+            self.qemu = subprocess.Popen([os.path.join(T, "..", "run-sidecar.sh"), A.kernel, words],
+                                         env=dict(env, HTTP_PORT=str(self.http)),
+                                         stdout=open(os.path.join(self.d, "qemu.out"), "w"),
+                                         stderr=subprocess.STDOUT, start_new_session=True)
+            self.event(f"qemu started (web on 127.0.0.1:{self.http})")
+            wait_bound(self.http, 10, lambda: self.qemu.poll() is None)
         for _ in range(100):
-            if os.path.exists(os.path.join(self.d, "qmp.sock")):
+            if os.path.exists(self.qmp_path):
                 break
             time.sleep(0.1)
-        s = socket.socket(socket.AF_UNIX); s.connect(os.path.join(self.d, "qmp.sock"))
+        s = socket.socket(socket.AF_UNIX); s.connect(self.qmp_path)
         self.qmp = s.makefile("rw"); self.qmp.readline(); self.qmp_call("qmp_capabilities")
 
     def qmp_call(self, cmd, args=None):
@@ -120,7 +140,7 @@ class Step:
         self.check(f"QEMU shows {sorted(want) or 'no box'} {why}", got == sorted(want), f"(attached: {got})")
 
     def status(self):
-        r = urllib.request.Request(f"http://127.0.0.1:{HTTP}/status",
+        r = urllib.request.Request(f"http://127.0.0.1:{self.http}/status",
                                    headers={"Host": "10.0.2.15", "Origin": "http://10.0.2.15"})
         return json.loads(urllib.request.urlopen(r, timeout=5).read())
 
@@ -227,15 +247,18 @@ def again():
 
 
 steps = A.steps.split(",")
-for s in steps:
-    if s == "rytm-a4":
-        two_orders("rytm", "a4")
-    elif s == "a4-rytm":
-        two_orders("a4", "rytm")
-    elif s == "again":
-        again()
-    else:
-        sys.exit("unknown step " + s)
+try:
+    for s in steps:
+        if s == "rytm-a4":
+            two_orders("rytm", "a4")
+        elif s == "a4-rytm":
+            two_orders("a4", "rytm")
+        elif s == "again":
+            again()
+        else:
+            sys.exit("unknown step " + s)
+finally:
+    shutil.rmtree(SOCKS, ignore_errors=True)
 print("\n".join("FAIL " + f for f in fails))
 print("TWO-BOX GATE (emulator):", "PASS" if not fails else f"FAIL ({len(fails)})")
 sys.exit(1 if fails else 0)
