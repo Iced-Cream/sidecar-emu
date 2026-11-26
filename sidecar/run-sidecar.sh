@@ -85,9 +85,17 @@ if [ -n "$A4_LINK" ]; then
   args+=(-chardev "socket,id=al,$(addr "$A4_LINK"),reconnect-ms=1000"
          -device "usb-a4,id=a4,chardev=al${aport[*]}")
 fi
+# RYTM2_LINK: a second Rytm on the hub's port 3 instead of the A4 (same type twice; RYTM2_UID its unit ID, the
+# vendor request 0's answer, default 0x9f003fa2; the first Rytm's RYTM_UID, default the device's own)
+RYTM2_LINK=${RYTM2_LINK:-}
+if [ -n "$RYTM2_LINK" ]; then
+  [ -n "$TEENSY" ] || [ -n "$A4_LINK" ] || [ -n "$DT_LINK" ] || { args+=(-device usb-hub,id=pihub,bus=usb-bus.1,port=1,high-speed=on,ports=4); rport=(,bus=usb-bus.1,port=1.1); }
+  args+=(-chardev "socket,id=r2l,$(addr "$RYTM2_LINK"),reconnect-ms=1000"
+         -device "usb-rytm,id=rytm2,chardev=r2l,uid=${RYTM2_UID:-0x9f003fa2},bus=usb-bus.1,port=1.3")
+fi
 if [ -n "$LINK" ]; then
   args+=(-chardev "socket,id=rl,$(addr "$LINK"),reconnect-ms=1000"
-         -device "usb-rytm,id=rytm,chardev=rl${rport[*]}")
+         -device "usb-rytm,id=rytm,chardev=rl${rport[*]}${RYTM_UID:+,uid=$RYTM_UID}")
 fi
 if [ "$TEENSY" = none ]; then
   args+=(-device "usb-teensy${tport[*]}${TEENSY_OPTS:+,$TEENSY_OPTS}")

@@ -29,6 +29,8 @@ asking its profile's voices (Rytm 8, A4 4, Digitakt 8; `voices` and `short` are 
   sidecar/tools/twobox-gate.py KERNEL OUTDIR [--words "..."] [--steps rytm-a4,a4-rytm,again] [--expect-folders]
       [--expect-slots]
   The Digitakt pairs: --steps rytm-dt,dt-rytm,a4-dt,dt-a4,again:dt-a4
+  Two Rytms: UIDS=01eeffc0,a23f009f ... --steps rytm-rytm2,rytm2-rytm,again:rytm-rytm2 --expect-folders
+      (UIDS: the folder names the kernel makes from run-sidecar.sh's RYTM_UID / RYTM2_UID)
 Environment: QEMU, CPUS, HTTP_PORT (default: 18118 if free, else a free port) as run-sidecar.sh; ATTACH_GAP (default 20), HOLD (default 30:
 seconds between the events after the second attach), WEB_WAIT (default 300). Kills only the processes it started.
 """
@@ -53,7 +55,11 @@ WEB_WAIT = float(os.environ.get("WEB_WAIT", "300"))
 # folder, the voices its profile asks, and a word its /status `box` name holds
 BOX = {"rytm": dict(hello=0, env="LINK", folder="/.rytm", voices=8, word="rytm"),
        "a4": dict(hello=3, env="A4_LINK", folder="/.a4", voices=4, word="a4"),
-       "dt": dict(hello=2, env="DT_LINK", folder="/.dt", voices=8, word="digitakt")}
+       "dt": dict(hello=2, env="DT_LINK", folder="/.dt", voices=8, word="digitakt"),
+       # a second Rytm (same type twice, sidecar-firmware DeviceUID folders): run-sidecar.sh RYTM2_LINK, on the hub's
+       # port 3 in place of the A4; its state is a UID folder under /.rytm (UIDS names the folders to expect)
+       "rytm2": dict(hello=0, env="RYTM2_LINK", folder="/.rytm", voices=8, word="rytm")}
+UIDS = [u for u in os.environ.get("UIDS", "").split(",") if u]   # two Rytms: the UID folders under /.rytm
 os.makedirs(A.outdir, exist_ok=True)
 _lock = open(os.path.join(A.outdir, ".twobox-gate.lock"), "w")
 try:
@@ -205,7 +211,8 @@ class Step:
             self.unplug(b)
         env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
         listing = {}
-        for d in ["::/"] + ["::" + BOX[b]["folder"] for b in BOX] + ["::/.sidecar"]:
+        for d in (["::/"] + list(dict.fromkeys("::" + BOX[b]["folder"] for b in BOX)) + ["::/.sidecar"]
+                  + [f"::/.rytm/{u}" for u in UIDS]):
             r = subprocess.run(["mdir", "-a", "-b", "-i", self.card + "@@1M", d], capture_output=True, text=True,
                                env=env)
             listing[d[2:]] = r.stdout.split() if r.returncode == 0 else None
@@ -214,8 +221,11 @@ class Step:
         folders = {f: listing[f] is not None for f in [BOX[b]["folder"] for b in BOX] + ["/.sidecar"]}
         self.summary["folders"] = folders
         self.log("card folders:", folders)
-        if A.expect_folders:
-            want = [BOX[b]["folder"] for b in self.boxes]
+        if A.expect_folders and "rytm2" in self.boxes:   # two Rytms: a UID folder each
+            have = [listing.get(f"/.rytm/{u}") is not None for u in UIDS]
+            self.check(f"the card has a folder for each Rytm (/.rytm/{{{','.join(UIDS)}}})", bool(UIDS) and all(have))
+        elif A.expect_folders:
+            want = list(dict.fromkeys(BOX[b]["folder"] for b in self.boxes))
             self.check("the card has " + " and ".join(want), all(folders[f] for f in want))
         uart = open(os.path.join(self.d, "uart.log"), errors="replace").read() if os.path.exists(
             os.path.join(self.d, "uart.log")) else ""
