@@ -38,8 +38,10 @@ HTTP_FIXED = os.environ.get("HTTP_PORT")
 GAP = float(os.environ.get("ATTACH_GAP", "20"))
 HOLD = float(os.environ.get("HOLD", "30"))
 WEB_WAIT = float(os.environ.get("WEB_WAIT", "300"))
-HELLO = {"rytm": 0, "a4": 3}      # a stock Rytm never says hello; the A4 companion says hello with id 3
-DEV = ("rytm", "a4")            # the QEMU device ids run-sidecar.sh gives them
+HELLO = {"rytm": 0, "a4": 3, "rytm2": 0}   # a stock Rytm never says hello; the A4 companion says hello with id 3
+# BOXES=rytm,rytm2: two Rytms (same type twice; run-sidecar.sh RYTM2_LINK) in place of the Rytm and the A4
+SECOND = "rytm2" if os.environ.get("BOXES", "") == "rytm,rytm2" else "a4"
+DEV = ("rytm", SECOND)          # the QEMU device ids run-sidecar.sh gives them
 os.makedirs(A.outdir, exist_ok=True)
 _lock = open(os.path.join(A.outdir, ".twobox-gate.lock"), "w")
 try:
@@ -47,7 +49,7 @@ try:
 except OSError:
     sys.exit(f"another twobox-gate.py is using {A.outdir}; give each run its own OUTDIR")
 SOCKS = tempfile.mkdtemp(prefix="twobox-")   # short paths (a unix socket path has ~107 bytes), one folder per run
-LINKS = {b: os.path.join(SOCKS, b + ".link") for b in ("rytm", "a4")}
+LINKS = {b: os.path.join(SOCKS, b + ".link") for b in ("rytm", "a4", "rytm2")}
 fails = []
 
 
@@ -92,7 +94,8 @@ class Step:
     def boot(self):
         if os.path.exists(self.qmp_path):
             os.unlink(self.qmp_path)
-        env = dict(os.environ, LINK="unix:" + LINKS["rytm"], A4_LINK="unix:" + LINKS["a4"],
+        second = {"RYTM2_LINK": "unix:" + LINKS["rytm2"], "A4_LINK": ""} if SECOND == "rytm2" else {"A4_LINK": "unix:" + LINKS["a4"]}
+        env = dict(os.environ, LINK="unix:" + LINKS["rytm"], **second,
                    CARD=self.card, QMP=self.qmp_path, UART=os.path.join(self.d, "uart.log"),
                    GADGET_PORT="", WATCHDOG="off")
         words = f"{A.words} paircode=0".strip()
@@ -190,7 +193,7 @@ class Step:
             self.unplug(b)
         env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
         listing = {}
-        for d in ("::/", "::/.rytm", "::/.a4", "::/.sidecar"):
+        for d in ("::/", "::/.rytm", "::/.a4", "::/.sidecar") + tuple(f"::/.rytm/{u}" for u in UIDS):
             r = subprocess.run(["mdir", "-a", "-b", "-i", self.card + "@@1M", d], capture_output=True, text=True,
                                env=env)
             listing[d[2:]] = r.stdout.split() if r.returncode == 0 else None
@@ -199,7 +202,10 @@ class Step:
         folders = {f: listing[f] is not None for f in ("/.rytm", "/.a4", "/.sidecar")}
         self.summary["folders"] = folders
         self.log("card folders:", folders)
-        if A.expect_folders:
+        if A.expect_folders and SECOND == "rytm2":
+            have = [listing.get(f"/.rytm/{u}") is not None for u in UIDS]
+            self.check(f"the card has a folder for each Rytm (/.rytm/{{{','.join(UIDS)}}})", bool(UIDS) and all(have))
+        elif A.expect_folders:
             self.check("the card has /.rytm and /.a4", folders["/.rytm"] and folders["/.a4"])
         uart = open(os.path.join(self.d, "uart.log"), errors="replace").read() if os.path.exists(
             os.path.join(self.d, "uart.log")) else ""
@@ -210,6 +216,9 @@ class Step:
             "\n".join(l for l in uart.splitlines() if pat.search(l)) + "\n")
         self.summary["reboots"] = len(re.findall(r"engine: reboot:", uart))
         json.dump(self.summary, open(os.path.join(self.d, "summary.json"), "w"), indent=1)
+
+
+UIDS = [u for u in os.environ.get("UIDS", "").split(",") if u]   # UID folders to list (two Rytms)
 
 
 def two_orders(first, second):
@@ -233,13 +242,13 @@ def two_orders(first, second):
 
 
 def again():
-    card = os.path.join(A.outdir, "rytm-a4", "card.img")
+    card = os.path.join(A.outdir, f"rytm-{SECOND}", "card.img")
     if not os.path.exists(card):
-        print("[again] needs the rytm-a4 step's card; skipped"); return
+        print(f"[again] needs the rytm-{SECOND} step's card; skipped"); return
     st = Step("again", card)
     try:
-        st.plug("rytm"); st.plug("a4"); st.boot()
-        st.expect_usb(["rytm", "a4"], "with both plugged at boot")
+        st.plug("rytm"); st.plug(SECOND); st.boot()
+        st.expect_usb(["rytm", SECOND], "with both plugged at boot")
         st.check("/status answers", st.web_up())
         st.poll(HOLD)
     finally:
@@ -253,6 +262,10 @@ try:
             two_orders("rytm", "a4")
         elif s == "a4-rytm":
             two_orders("a4", "rytm")
+        elif s == "rytm-rytm2" and SECOND == "rytm2":
+            two_orders("rytm", "rytm2")
+        elif s == "rytm2-rytm" and SECOND == "rytm2":
+            two_orders("rytm2", "rytm")
         elif s == "again":
             again()
         else:
