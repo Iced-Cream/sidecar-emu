@@ -32,6 +32,15 @@
  * first, the rest zero. Two such devices (a Rytm and an A4) on one host are
  * the Sidecar's "two Links" gate.
  *
+ * usb-digitakt is the same device as a Digitakt (mk1) in OVERBRIDGE mode
+ * (1935:0b2c): 12 channels to the host (MAIN L R, tracks 1..8, INPUT L R;
+ * 368 B blocks), 2 from it (MAIN L R; 88 B blocks), at alternate 3 of the
+ * same interfaces and endpoints. The layout is the one sidecar-firmware's
+ * docs/device-profiles.md "Audio" records (Overwitch's device table and a
+ * community port's measurements on a unit); nothing comes from the
+ * Digitakt's firmware. Its link is the same oblink.rs protocol: the link's
+ * 12-channel frames carry the Digitakt's channels, the host's 2 first.
+ *
  * Local experiment for the Sidecar project's emulator gates; not intended
  * for upstream QEMU.
  *
@@ -56,6 +65,7 @@
 
 #define TYPE_USB_RYTM "usb-rytm"
 #define TYPE_USB_A4   "usb-a4"
+#define TYPE_USB_DT   "usb-digitakt"
 OBJECT_DECLARE_SIMPLE_TYPE(USBRytmState, USB_RYTM)
 
 #define OB_CHANNELS         12              /* a link frame; the most a block has */
@@ -368,6 +378,90 @@ static const USBDesc desc_a4 = {
     .str  = desc_strings_a4,
 };
 
+/* The Digitakt mk1: the same layout; alternate 3's packets are its blocks
+ * (12 channels in, 2 out). Alternates 1 and 2 as the A4's (no host here uses
+ * them). */
+static const USBDescStrings desc_strings_dt = {
+    [STR_MANUFACTURER] = "Elektron Music Machines",
+    [STR_PRODUCT]      = "Digitakt",
+    [STR_SERIALNUMBER] = "000000000003",
+};
+
+static USBDescEndpoint dt_in_eps[3] = {
+    { .bEndpointAddress = USB_DIR_IN | OB_EP_IN, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 32, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_IN | OB_EP_IN, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 88, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_IN | OB_EP_IN, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = OB_BLOCK_OF(12), .bInterval = 1 },
+};
+
+static USBDescEndpoint dt_out_eps[3] = {
+    { .bEndpointAddress = USB_DIR_OUT | OB_EP_OUT, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 32, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_OUT | OB_EP_OUT, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = 88, .bInterval = 1 },
+    { .bEndpointAddress = USB_DIR_OUT | OB_EP_OUT, .bmAttributes = USB_ENDPOINT_XFER_INT,
+      .wMaxPacketSize = OB_BLOCK_OF(2), .bInterval = 1 },
+};
+
+static const USBDescIface dt_ob_ifaces[] = {
+    VENDOR_IF(0, 0, 0, NULL),
+    VENDOR_IF(1, 0, 0, NULL),
+    VENDOR_IF(1, 1, 1, &dt_in_eps[0]),
+    VENDOR_IF(1, 2, 1, &dt_in_eps[1]),
+    VENDOR_IF(1, 3, 1, &dt_in_eps[2]),
+    VENDOR_IF(2, 0, 0, NULL),
+    VENDOR_IF(2, 1, 1, &dt_out_eps[0]),
+    VENDOR_IF(2, 2, 1, &dt_out_eps[1]),
+    VENDOR_IF(2, 3, 1, &dt_out_eps[2]),
+    VENDOR_IF(3, 0, 2, pipe_eps),
+};
+
+static const USBDescIfaceAssoc dt_groups[] = {
+    {
+        .bFirstInterface = 0, .bInterfaceCount = 4,
+        .bFunctionClass = USB_CLASS_VENDOR_SPEC,
+        .nif = ARRAY_SIZE(dt_ob_ifaces), .ifs = dt_ob_ifaces,
+    }, {
+        .bFirstInterface = 4, .bInterfaceCount = 2,
+        .bFunctionClass = USB_CLASS_AUDIO, .bFunctionSubClass = 0x01,
+        .nif = ARRAY_SIZE(midi_ifaces), .ifs = midi_ifaces,
+    },
+};
+
+static const USBDescDevice desc_device_dt = {
+    .bcdUSB             = 0x0200,
+    .bDeviceClass       = 0xef,
+    .bDeviceSubClass    = 0x02,
+    .bDeviceProtocol    = 0x01,
+    .bMaxPacketSize0    = 64,
+    .bNumConfigurations = 1,
+    .confs = (USBDescConfig[]) {
+        {
+            .bNumInterfaces      = 6,
+            .bConfigurationValue = 1,
+            .bmAttributes        = USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER,
+            .bMaxPower           = 0,
+            .nif_groups          = ARRAY_SIZE(dt_groups),
+            .if_groups           = dt_groups,
+        },
+    },
+};
+
+static const USBDesc desc_dt = {
+    .id = {
+        .idVendor          = 0x1935,
+        .idProduct         = 0x0b2c,
+        .bcdDevice         = 0x0100,
+        .iManufacturer     = STR_MANUFACTURER,
+        .iProduct          = STR_PRODUCT,
+        .iSerialNumber     = STR_SERIALNUMBER,
+    },
+    .high = &desc_device_dt,
+    .str  = desc_strings_dt,
+};
+
 static const BoxModel model_rytm = {
     .product_desc = "Analog Rytm MKII stand-in", .desc = &desc_rytm,
     .in_ch = 12, .out_ch = 12,
@@ -380,6 +474,13 @@ static const BoxModel model_a4 = {
     .in_ch = 8, .out_ch = 6,
     .name = "Analog Four MKII (QEMU)", .os_version = "1.56",
     .uid = 0x00000000c0ffee02ULL,
+};
+
+static const BoxModel model_dt = {
+    .product_desc = "Digitakt stand-in", .desc = &desc_dt,
+    .in_ch = 12, .out_ch = 2,
+    .name = "Digitakt (QEMU)", .os_version = "1.52",
+    .uid = 0x00000000c0ffee03ULL,
 };
 
 /* ---------------------------------------------------------------------------
@@ -946,7 +1047,9 @@ static void rytm_instance_init(Object *obj)
 {
     USBRytmState *s = USB_RYTM(obj);
 
-    s->m = strcmp(object_get_typename(obj), TYPE_USB_A4) == 0 ? &model_a4 : &model_rytm;
+    const char *t = object_get_typename(obj);
+
+    s->m = !strcmp(t, TYPE_USB_A4) ? &model_a4 : !strcmp(t, TYPE_USB_DT) ? &model_dt : &model_rytm;
     s->in_blk = OB_BLOCK_OF(s->m->in_ch);
     s->out_blk = OB_BLOCK_OF(s->m->out_ch);
     s->uid = s->m->uid;
@@ -995,10 +1098,26 @@ static const TypeInfo a4_info = {
     .class_init    = a4_class_init,
 };
 
+/* the Digitakt: the same, with its own descriptors */
+static void dt_class_init(ObjectClass *klass, const void *data)
+{
+    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
+
+    uc->product_desc = model_dt.product_desc;
+    uc->usb_desc     = model_dt.desc;
+}
+
+static const TypeInfo dt_info = {
+    .name          = TYPE_USB_DT,
+    .parent        = TYPE_USB_RYTM,
+    .class_init    = dt_class_init,
+};
+
 static void rytm_register_types(void)
 {
     type_register_static(&rytm_info);
     type_register_static(&a4_info);
+    type_register_static(&dt_info);
 }
 
 type_init(rytm_register_types)

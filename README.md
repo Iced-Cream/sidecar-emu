@@ -49,7 +49,7 @@ assistant, so none of it may be submitted to QEMU.
      render-core guard.
   8. **Minimal build.** The `raspi` Kconfig entry selects what it needs, and
      `configs/devices/aarch64-softmmu/sidecar.mak` enables only raspi4b,
-     usb-rytm (and usb-a4), usb-teensy, usb-hub and usb-hid.
+     usb-rytm (and usb-a4, usb-digitakt), usb-teensy, usb-hub and usb-hid.
   9. **usb-teensy** (`hw/usb/dev-teensy.c`). A stand-in for the Teensy 4.1
      mirror relay, not an emulation of its chip or firmware: the link
      (1209:0002, protocol 1.02 of sidecar-firmware `pi/engine/relay_proto.h`:
@@ -77,6 +77,15 @@ assistant, so none of it may be submitted to QEMU.
      (6 channels), its own serial and uid. With usb-rytm it makes the
      two-box Pi (`A4_LINK=` for run-sidecar.sh). Each box attaches when its
      link connects and detaches when it closes.
+  13. **usb-digitakt** (in `hw/usb/dev-rytm.c`). A Digitakt (mk1) stand-in
+     (1935:0b2c, product "Digitakt") on the same link protocol: alternate 3
+     blocks of 368 B in (12 channels: MAIN, tracks 1..8, INPUT) and 88 B out
+     (2 channels, MAIN), its own serial and uid, on port 4 of the board hub
+     (`DT_LINK=` for run-sidecar.sh; `LINK=` empty leaves the Rytm out, for
+     an A4 + Digitakt pair). The layout is sidecar-firmware's
+     docs/device-profiles.md "Audio" table; nothing of the Digitakt's
+     firmware is in it, and no Digitakt emulator stands behind the link
+     (a stublink, sine on MAIN).
 
 ## Build
 
@@ -138,17 +147,23 @@ its own `CPUS` (e.g. `0-1` and `2-3`).
   (sidecar-firmware `tools/teensy_flash.py`, with `paircode=0` in the
   emulator's cmdline) runs against usb-teensy as against the real relay.
 
-- `sidecar/tools/twobox-gate.py <kernel> <outdir> [--expect-folders]`: two
-  boxes on one Pi (usb-rytm and usb-a4 behind the board hub, each on its own
-  stublink, a fresh card). Step `rytm-a4`: the Rytm at boot, the A4 plugged
-  second, unplugged and plugged back; `a4-rytm` the same the other way
-  round; `again` boots on the first step's card. It judges the emulator
-  (QEMU's attached boxes at each step, /status, a readable card, no
-  panic/assert) and records the engine's /status, UART lines and card
-  folders (`/.rytm`, `/.a4`, `/.sidecar`) in each step's `summary.json`;
-  `--expect-folders` adds `/.rytm` and `/.a4` to the pass. The A4's stub
-  says hello with box id 3 (`stublink.py --hello 3`), the Rytm's none.
-  Digitakt: not modelled (no usb-digitakt, no link for it in analog-emu).
+- `sidecar/tools/twobox-gate.py <kernel> <outdir> [--steps ...]
+  [--expect-folders] [--expect-slots]`: two boxes on one Pi (two of
+  usb-rytm, usb-a4 and usb-digitakt behind the board hub, each on its own
+  stublink, a fresh card). A step names two boxes in attach order: `rytm-a4`
+  is the Rytm at boot, the A4 plugged second, unplugged and plugged back;
+  `a4-rytm`, `rytm-dt`, `dt-rytm`, `a4-dt`, `dt-a4` the same for those;
+  `again` boots on rytm-a4's card, `again:X-Y` on step X-Y's. Default
+  steps `rytm-a4,a4-rytm,again`. It judges the emulator (QEMU's attached
+  boxes at each step, /status, a readable card, no panic/assert) and
+  records the engine's /status, UART lines and card folders (`/.rytm`,
+  `/.a4`, `/.dt`, `/.sidecar`) in each step's `summary.json`;
+  `--expect-folders` adds the step's boxes' folders to the pass;
+  `--expect-slots` adds the engine's `slots` (first box slot 0, second
+  slot 1, the first kept while the second is out) and, on a kernel with
+  CPU admission, each box asking its profile's voices (Rytm 8, A4 4,
+  Digitakt 8). The A4's stub says hello with box id 3, the Digitakt's with
+  2, the Rytm's none.
 
 Kernels, analog-emu cards and anything else built from instrument firmware
 stay out of this repository.

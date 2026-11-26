@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
 """twobox-gate.py: two boxes on one emulated Pi, in both attach orders, with a detach and reattach and an SD card.
 
-A Sidecar kernel on raspi4b with usb-rytm and usb-a4 behind the high-speed board hub (run-sidecar.sh with LINK and
-A4_LINK), a fresh FAT32 card on EMMC2 (CARD), and QMP (QMP). Each box's link is a stublink.py; a box attaches when its
-link starts and detaches when it stops, so the script sets the attach order by starting the links in turn:
+A Sidecar kernel on raspi4b with two of usb-rytm, usb-a4 and usb-digitakt behind the high-speed board hub
+(run-sidecar.sh with LINK, A4_LINK, DT_LINK), a fresh FAT32 card on EMMC2 (CARD), and QMP (QMP). Each box's link is a
+stublink.py (the A4 says hello with id 3, the Digitakt with 2, the Rytm none); a box attaches when its link starts and
+detaches when it stops, so the script sets the attach order by starting the links in turn. A step names its two boxes
+in attach order, any two of rytm, a4, dt:
 
   rytm-a4   Rytm at boot, A4 once the web answers (+ATTACH_GAP s), A4 unplugged and plugged back
   a4-rytm   A4 at boot, Rytm once the web answers (+ATTACH_GAP s), Rytm unplugged and plugged back
+  dt-rytm, rytm-dt, a4-dt, dt-a4, ...   the same for those boxes (a step without the Rytm plugs no usb-rytm)
   again     a boot on rytm-a4's card with both boxes, so what the first boot saved is read back
+  again:X-Y the same on step X-Y's card with its two boxes
 
 Several gates can run at once on one host, each with its own OUTDIR: the box links are unix sockets in a private
 temporary folder, and the web port is HTTP_PORT if set, otherwise 18118 when free, otherwise a free port (picked per
 step, logged in run.log and summary.json). Give parallel runs different CPUS. After each step each box's `attached` property is read over QMP (the emulator's own view of what is plugged),
-/status is logged whenever it changes, and after QEMU stops the card's /, /.rytm, /.a4 and /.sidecar are listed.
+/status is logged whenever it changes, and after QEMU stops the card's /, /.rytm, /.a4, /.dt and /.sidecar are listed.
 
 The script judges the emulator only (PASS/FAIL lines): the boxes QEMU shows match each step, /status answers, the card
 holds a readable FAT, no panic/assert in the UART log. What the engine does with the boxes (its slots, its folders)
 is recorded in each step's summary.json and status.log for the kernel's own gate to judge; --expect-folders makes
-the card's /.rytm and /.a4 part of the PASS.
+the card's folders of the step's two boxes part of the PASS. --expect-slots also judges the engine's /status `slots`
+(sidecar-firmware attach-order slots): with both plugged, the first box in slot 0 and the second in slot 1; with the
+second unplugged, the first still in slot 0; and, on a kernel whose slots report `asked` (CPU admission), each box
+asking its profile's voices (Rytm 8, A4 4, Digitakt 8; `voices` and `short` are recorded, not judged).
 
   sidecar/tools/twobox-gate.py KERNEL OUTDIR [--words "..."] [--steps rytm-a4,a4-rytm,again] [--expect-folders]
+      [--expect-slots]
+  The Digitakt pairs: --steps rytm-dt,dt-rytm,a4-dt,dt-a4,again:dt-a4
+  Two Rytms: UIDS=01eeffc0,a23f009f ... --steps rytm-rytm2,rytm2-rytm,again:rytm-rytm2 --expect-folders
+      (UIDS: the folder names the kernel makes from run-sidecar.sh's RYTM_UID / RYTM2_UID)
 Environment: QEMU, CPUS, HTTP_PORT (default: 18118 if free, else a free port) as run-sidecar.sh; ATTACH_GAP (default 20), HOLD (default 30:
 seconds between the events after the second attach), WEB_WAIT (default 300). Kills only the processes it started.
 """
@@ -33,15 +44,22 @@ P.add_argument("kernel"); P.add_argument("outdir")
 P.add_argument("--words", default="sdport=0 display=0 bench=0 blocklimit=1000")
 P.add_argument("--steps", default="rytm-a4,a4-rytm,again")
 P.add_argument("--expect-folders", action="store_true")
+P.add_argument("--expect-slots", action="store_true")
 A = P.parse_args()
 HTTP_FIXED = os.environ.get("HTTP_PORT")
 GAP = float(os.environ.get("ATTACH_GAP", "20"))
 HOLD = float(os.environ.get("HOLD", "30"))
 WEB_WAIT = float(os.environ.get("WEB_WAIT", "300"))
-HELLO = {"rytm": 0, "a4": 3, "rytm2": 0}   # a stock Rytm never says hello; the A4 companion says hello with id 3
-# BOXES=rytm,rytm2: two Rytms (same type twice; run-sidecar.sh RYTM2_LINK) in place of the Rytm and the A4
-SECOND = "rytm2" if os.environ.get("BOXES", "") == "rytm,rytm2" else "a4"
-DEV = ("rytm", SECOND)          # the QEMU device ids run-sidecar.sh gives them
+# each box: the hello id its stub says (a stock Rytm never says hello; the A4 companion 3, the Digitakt mod 2,
+# sidecar-firmware core/device), run-sidecar.sh's variable for its link (its QEMU device id is the key), its state
+# folder, the voices its profile asks, and a word its /status `box` name holds
+BOX = {"rytm": dict(hello=0, env="LINK", folder="/.rytm", voices=8, word="rytm"),
+       "a4": dict(hello=3, env="A4_LINK", folder="/.a4", voices=4, word="a4"),
+       "dt": dict(hello=2, env="DT_LINK", folder="/.dt", voices=8, word="digitakt"),
+       # a second Rytm (same type twice, sidecar-firmware DeviceUID folders): run-sidecar.sh RYTM2_LINK, on the hub's
+       # port 3 in place of the A4; its state is a UID folder under /.rytm (UIDS names the folders to expect)
+       "rytm2": dict(hello=0, env="RYTM2_LINK", folder="/.rytm", voices=8, word="rytm")}
+UIDS = [u for u in os.environ.get("UIDS", "").split(",") if u]   # two Rytms: the UID folders under /.rytm
 os.makedirs(A.outdir, exist_ok=True)
 _lock = open(os.path.join(A.outdir, ".twobox-gate.lock"), "w")
 try:
@@ -49,13 +67,13 @@ try:
 except OSError:
     sys.exit(f"another twobox-gate.py is using {A.outdir}; give each run its own OUTDIR")
 SOCKS = tempfile.mkdtemp(prefix="twobox-")   # short paths (a unix socket path has ~107 bytes), one folder per run
-LINKS = {b: os.path.join(SOCKS, b + ".link") for b in ("rytm", "a4", "rytm2")}
+LINKS = {b: os.path.join(SOCKS, b + ".link") for b in BOX}
 fails = []
 
 
 class Step:
-    def __init__(self, name, card):
-        self.name, self.card = name, card
+    def __init__(self, name, card, boxes):
+        self.name, self.card, self.boxes = name, card, boxes
         self.d = os.path.join(A.outdir, name); os.makedirs(self.d, exist_ok=True)
         self.t0 = time.time(); self.log_f = open(os.path.join(self.d, "run.log"), "w")
         self.stubs, self.qemu, self.qmp = {}, None, None
@@ -78,7 +96,7 @@ class Step:
         n = sum(1 for e in self.summary["events"] if e[1] == "plug " + box) + 1
         f = open(os.path.join(self.d, f"stublink-{box}{n}.log"), "w")
         self.stubs[box] = subprocess.Popen([sys.executable, os.path.join(T, "stublink.py"), "unix:" + LINKS[box],
-                                            "--hello", str(HELLO[box])],
+                                            "--hello", str(BOX[box]["hello"])],
                                            stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
         self.event("plug " + box)
 
@@ -94,10 +112,10 @@ class Step:
     def boot(self):
         if os.path.exists(self.qmp_path):
             os.unlink(self.qmp_path)
-        second = {"RYTM2_LINK": "unix:" + LINKS["rytm2"], "A4_LINK": ""} if SECOND == "rytm2" else {"A4_LINK": "unix:" + LINKS["a4"]}
-        env = dict(os.environ, LINK="unix:" + LINKS["rytm"], **second,
-                   CARD=self.card, QMP=self.qmp_path, UART=os.path.join(self.d, "uart.log"),
+        env = dict(os.environ, CARD=self.card, QMP=self.qmp_path, UART=os.path.join(self.d, "uart.log"),
                    GADGET_PORT="", WATCHDOG="off")
+        for b in BOX:   # only the step's boxes are plugged in QEMU; LINK empty leaves the Rytm out
+            env[BOX[b]["env"]] = "unix:" + LINKS[b] if b in self.boxes else ""
         words = f"{A.words} paircode=0".strip()
         with PortLock():   # pick and bind the web port before another run can pick it
             if not HTTP_FIXED:
@@ -126,7 +144,7 @@ class Step:
     def usb(self):
         """the boxes QEMU has attached (each device's `attached` property over QMP)"""
         got = []
-        for b in DEV:
+        for b in self.boxes:
             r = self.qmp_call("qom-get", {"path": f"/machine/peripheral/{b}", "property": "attached"})
             if r.get("return") is True:
                 got.append(b)
@@ -193,37 +211,62 @@ class Step:
             self.unplug(b)
         env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
         listing = {}
-        for d in ("::/", "::/.rytm", "::/.a4", "::/.sidecar") + tuple(f"::/.rytm/{u}" for u in UIDS):
+        for d in (["::/"] + list(dict.fromkeys("::" + BOX[b]["folder"] for b in BOX)) + ["::/.sidecar"]
+                  + [f"::/.rytm/{u}" for u in UIDS]):
             r = subprocess.run(["mdir", "-a", "-b", "-i", self.card + "@@1M", d], capture_output=True, text=True,
                                env=env)
             listing[d[2:]] = r.stdout.split() if r.returncode == 0 else None
         self.summary["card"] = listing
         self.check("the card holds a readable FAT", listing["/"] is not None)
-        folders = {f: listing[f] is not None for f in ("/.rytm", "/.a4", "/.sidecar")}
+        folders = {f: listing[f] is not None for f in [BOX[b]["folder"] for b in BOX] + ["/.sidecar"]}
         self.summary["folders"] = folders
         self.log("card folders:", folders)
-        if A.expect_folders and SECOND == "rytm2":
+        if A.expect_folders and "rytm2" in self.boxes:   # two Rytms: a UID folder each
             have = [listing.get(f"/.rytm/{u}") is not None for u in UIDS]
             self.check(f"the card has a folder for each Rytm (/.rytm/{{{','.join(UIDS)}}})", bool(UIDS) and all(have))
         elif A.expect_folders:
-            self.check("the card has /.rytm and /.a4", folders["/.rytm"] and folders["/.a4"])
+            want = list(dict.fromkeys(BOX[b]["folder"] for b in self.boxes))
+            self.check("the card has " + " and ".join(want), all(folders[f] for f in want))
         uart = open(os.path.join(self.d, "uart.log"), errors="replace").read() if os.path.exists(
             os.path.join(self.d, "uart.log")) else ""
         bad = [l for l in uart.splitlines() if re.search(r"panic|assert", l, re.I)]
         self.check("no panic/assert in the UART log", not bad, bad[0][:200] if bad else "")
-        pat = re.compile(r"device: |slot|hello|claimed|attach|detach|release|/\.(rytm|a4|sidecar)", re.I)
+        pat = re.compile(r"device: |slot|hello|claimed|attach|detach|release|/\.(rytm|a4|dt|sidecar)", re.I)
         open(os.path.join(self.d, "uart-picked.log"), "w").write(
             "\n".join(l for l in uart.splitlines() if pat.search(l)) + "\n")
         self.summary["reboots"] = len(re.findall(r"engine: reboot:", uart))
         json.dump(self.summary, open(os.path.join(self.d, "summary.json"), "w"), indent=1)
 
 
-UIDS = [u for u in os.environ.get("UIDS", "").split(",") if u]   # UID folders to list (two Rytms)
+    def expect_slots(self, want, why):
+        """--expect-slots: /status `slots` hold want[k] in slot k (None: empty), each held box asking its voices"""
+        if not A.expect_slots:
+            return
+        slots, ok = None, False
+        for _ in range(15):        # a hello comes 6 s after the link; the slot follows it
+            try:
+                slots = self.status().get("slots")
+            except Exception:
+                slots = None
+            ok = bool(slots) and all(
+                (BOX[w]["word"] in (slots[k].get("box") or "").lower()) if w else not slots[k].get("box")
+                for k, w in enumerate(want))
+            if ok:
+                break
+            time.sleep(2)
+        self.summary.setdefault("slots", []).append([round(time.time() - self.t0, 1), why, slots])
+        self.check(f"/status slots {[w or '-' for w in want]} {why}", ok, f"(slots: {json.dumps(slots)})")
+        if ok and any("asked" in s for s in slots):
+            asked = {w: slots[k].get("asked") for k, w in enumerate(want) if w}
+            self.log("voices:", {w: [slots[k].get("voices"), slots[k].get("asked"), slots[k].get("short")]
+                                 for k, w in enumerate(want) if w}, "(admitted, asked, short)")
+            self.check(f"each box asks its profile's voices {why}", all(asked[w] == BOX[w]["voices"] for w in asked),
+                       f"(asked: {asked})")
 
 
 def two_orders(first, second):
     name = f"{first}-{second}"
-    st = Step(name, os.path.join(A.outdir, name, "card.img"))
+    st = Step(name, os.path.join(A.outdir, name, "card.img"), [first, second])
     subprocess.run([os.path.join(T, "mkcard.sh"), st.card], check=True, stdout=subprocess.DEVNULL)
     try:
         st.plug(first); st.boot()
@@ -231,45 +274,48 @@ def two_orders(first, second):
         st.check("/status answers", st.web_up())
         st.poll(GAP)
         st.plug(second); st.expect_usb([first, second], f"after the {second} is plugged second")
-        st.poll(HOLD)
+        st.poll(HOLD); st.expect_slots([first, second], f"after the {second} is plugged second")
         st.unplug(second); st.expect_usb([first], f"after the {second} is unplugged")
-        st.poll(HOLD)
+        st.poll(HOLD); st.expect_slots([first, None], f"after the {second} is unplugged")
         st.plug(second); st.expect_usb([first, second], f"after the {second} is plugged back")
-        st.poll(HOLD)
+        st.poll(HOLD); st.expect_slots([first, second], f"after the {second} is plugged back")
     finally:
         st.finish()
     return st
 
 
-def again():
-    card = os.path.join(A.outdir, f"rytm-{SECOND}", "card.img")
+def again(pair="rytm-a4"):
+    first, second = pair.split("-")
+    card = os.path.join(A.outdir, pair, "card.img")
     if not os.path.exists(card):
-        print(f"[again] needs the rytm-{SECOND} step's card; skipped"); return
-    st = Step("again", card)
+        print(f"[again] needs the {pair} step's card; skipped"); return
+    st = Step("again" if pair == "rytm-a4" else f"again-{pair}", card, [first, second])
     try:
-        st.plug("rytm"); st.plug(SECOND); st.boot()
-        st.expect_usb(["rytm", SECOND], "with both plugged at boot")
+        st.plug(first); st.plug(second); st.boot()
+        st.expect_usb([first, second], "with both plugged at boot")
         st.check("/status answers", st.web_up())
         st.poll(HOLD)
     finally:
         st.finish()
 
 
+def pair(s):
+    b = s.split("-")
+    return len(b) == 2 and b[0] in BOX and b[1] in BOX and b[0] != b[1]
+
+
 steps = A.steps.split(",")
+for s in steps:
+    if not (s == "again" or pair(s) or (s.startswith("again:") and pair(s[6:]))):
+        sys.exit(f"unknown step {s}: X-Y (two of {', '.join(BOX)}), again or again:X-Y")
 try:
     for s in steps:
-        if s == "rytm-a4":
-            two_orders("rytm", "a4")
-        elif s == "a4-rytm":
-            two_orders("a4", "rytm")
-        elif s == "rytm-rytm2" and SECOND == "rytm2":
-            two_orders("rytm", "rytm2")
-        elif s == "rytm2-rytm" and SECOND == "rytm2":
-            two_orders("rytm2", "rytm")
-        elif s == "again":
+        if s == "again":
             again()
+        elif s.startswith("again:"):
+            again(s[6:])
         else:
-            sys.exit("unknown step " + s)
+            two_orders(*s.split("-"))
 finally:
     shutil.rmtree(SOCKS, ignore_errors=True)
 print("\n".join("FAIL " + f for f in fails))
