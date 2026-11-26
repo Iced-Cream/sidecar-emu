@@ -8,9 +8,9 @@
 #                empty = no usb-rytm (default 127.0.0.1:7301)
 #   GADGET_PORT  TCP port for the USB-C gadget's raw MIDI, one client at a time,
 #                e.g. elkflash --port tcp:127.0.0.1:7400; empty = gadget off (default 7400)
-#                With TEENSY or A4_LINK set, a high-speed usb-hub goes on the VL805's USB 2
+#                With TEENSY, A4_LINK or DT_LINK set, a high-speed usb-hub goes on the VL805's USB 2
 #                port (as the Pi 4's on-board hub) with usb-rytm on its port 1
-#                and usb-teensy on its port 2 (usb-a4 on port 3)
+#                and usb-teensy on its port 2 (usb-a4 on port 3, usb-digitakt on port 4)
 #   TEENSY       host:port of sidecar/tools/teensystub.py (the computer behind
 #                the relay); empty = no usb-teensy (default empty). TEENSY=none
 #                plugs usb-teensy with no computer behind it
@@ -21,8 +21,12 @@
 #                high-speed hub, with usb-rytm on port 1 (default empty = no A4).
 #                The boxes attach when their links connect and detach when they
 #                close, so starting and stopping the links sets the attach order
+#   DT_LINK      the same for a Digitakt (mk1, stublink.py --hello 2): plugs
+#                usb-digitakt (1935:0b2c) on port 4 of the high-speed hub
+#                (default empty = no Digitakt). LINK= (empty) leaves the Rytm out,
+#                so an A4 + Digitakt pair has no Rytm
 #   CARD         raw SD card image for EMMC2 (tools/mkcard.sh makes one); the
-#                engine's folders (/.rytm, /.a4, /.sidecar) land there
+#                engine's folders (/.rytm, /.a4, /.dt, /.sidecar) land there
 #                (default empty = no card)
 #   QMP          unix socket path for a QMP monitor (tools/qmp.py, or
 #                tools/twobox-gate.py); default empty = none
@@ -34,7 +38,7 @@
 #                a second, and on a many-core host (WSL) that is far slower
 #                than on 2 CPUs. Empty = no pinning (default)
 #   EXTRA        more QEMU arguments
-# LINK, A4_LINK and TEENSY also take unix:PATH, a unix socket the stub listens on
+# LINK, A4_LINK, DT_LINK and TEENSY also take unix:PATH, a unix socket the stub listens on
 # (stublink.py unix:PATH, teensystub.py --port unix:PATH): a path per run needs no
 # free port, so several runs can share a host (tools/twobox-gate.py, tools/teensy-gate.sh)
 set -euo pipefail
@@ -66,10 +70,16 @@ fi
 addr() { case $1 in unix:*) echo "path=${1#unix:}";; *) echo "host=${1%:*},port=${1##*:}";; esac; }
 TEENSY=${TEENSY:-}
 A4_LINK=${A4_LINK:-}
-rport=() tport=() aport=()
-if [ -n "$TEENSY" ] || [ -n "$A4_LINK" ]; then
+DT_LINK=${DT_LINK:-}
+rport=() tport=() aport=() dport=()
+if [ -n "$TEENSY" ] || [ -n "$A4_LINK" ] || [ -n "$DT_LINK" ]; then
   args+=(-device usb-hub,id=pihub,bus=usb-bus.1,port=1,high-speed=on,ports=4)
   rport=(,bus=usb-bus.1,port=1.1) tport=(,bus=usb-bus.1,port=1.2) aport=(,bus=usb-bus.1,port=1.3)
+  dport=(,bus=usb-bus.1,port=1.4)
+fi
+if [ -n "$DT_LINK" ]; then
+  args+=(-chardev "socket,id=dl,$(addr "$DT_LINK"),reconnect-ms=1000"
+         -device "usb-digitakt,id=dt,chardev=dl${dport[*]}")
 fi
 if [ -n "$A4_LINK" ]; then
   args+=(-chardev "socket,id=al,$(addr "$A4_LINK"),reconnect-ms=1000"
