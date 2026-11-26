@@ -29,8 +29,9 @@ asking its profile's voices (Rytm 8, A4 4, Digitakt 8; `voices` and `short` are 
   sidecar/tools/twobox-gate.py KERNEL OUTDIR [--words "..."] [--steps rytm-a4,a4-rytm,again] [--expect-folders]
       [--expect-slots]
   The Digitakt pairs: --steps rytm-dt,dt-rytm,a4-dt,dt-a4,again:dt-a4
-  Two Rytms: UIDS=01eeffc0,a23f009f ... --steps rytm-rytm2,rytm2-rytm,again:rytm-rytm2 --expect-folders
-      (UIDS: the folder names the kernel makes from run-sidecar.sh's RYTM_UID / RYTM2_UID)
+  Two Rytms: UIDS=c0ffee01,9f003fa2 ... --steps rytm-rytm2,rytm2-rytm,again:rytm-rytm2 --expect-folders
+      (UIDS: the folder names the kernel makes from run-sidecar.sh's RYTM_UID / RYTM2_UID: the low 32 bits in hex, as
+      a kernel that reads the vendor request big-endian, like the units, names them)
 Environment: QEMU, CPUS, HTTP_PORT (default: 18118 if free, else a free port) as run-sidecar.sh; ATTACH_GAP (default 20), HOLD (default 30:
 seconds between the events after the second attach), WEB_WAIT (default 300). Kills only the processes it started.
 """
